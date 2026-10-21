@@ -1448,6 +1448,46 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
   }
 
   // Call & Chat Transaction History View
+  Widget _buildRecentsTextTab({
+    required String title,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected ? brandTextDark : const Color(0xFF94A3B8),
+                letterSpacing: -0.2,
+              ),
+            ),
+            const SizedBox(height: 6),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              height: 3.5,
+              width: 32,
+              decoration: BoxDecoration(
+                color: isSelected ? brandPrimary : Colors.transparent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildRecentsTab() {
     final appState = context.watch<AppState>();
 
@@ -1456,107 +1496,37 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Toggle Header: [ Call ] and [ Chat ]
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF1F5F9), // Slate 100 pill
-              borderRadius: BorderRadius.circular(14),
-            ),
+          // Top 2-Column Text Tabs: Call & Chats with Center Alignment
+          Padding(
+            padding: const EdgeInsets.only(top: 4.0, bottom: 8.0),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                // Call Tab Button
-                InkWell(
-                  onTap: () {
-                    if (_recentsSubTab != 0) {
-                      setState(() => _recentsSubTab = 0);
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: _recentsSubTab == 0 ? brandPrimary : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: _recentsSubTab == 0
-                          ? [
-                              BoxShadow(
-                                color: brandPrimary.withValues(alpha: 0.25),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.phone_rounded,
-                          size: 18,
-                          color: _recentsSubTab == 0 ? Colors.white : brandTextGrey,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Call',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: _recentsSubTab == 0 ? Colors.white : brandTextGrey,
-                          ),
-                        ),
-                      ],
-                    ),
+                Expanded(
+                  child: _buildRecentsTextTab(
+                    title: 'Call',
+                    isSelected: _recentsSubTab == 0,
+                    onTap: () {
+                      if (_recentsSubTab != 0) {
+                        setState(() => _recentsSubTab = 0);
+                      }
+                    },
                   ),
                 ),
-                const SizedBox(width: 4),
-                // Chat Tab Button
-                InkWell(
-                  onTap: () {
-                    if (_recentsSubTab != 1) {
-                      setState(() => _recentsSubTab = 1);
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(10),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: _recentsSubTab == 1 ? brandPrimary : Colors.transparent,
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: _recentsSubTab == 1
-                          ? [
-                              BoxShadow(
-                                color: brandPrimary.withValues(alpha: 0.25),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.chat_bubble_rounded,
-                          size: 18,
-                          color: _recentsSubTab == 1 ? Colors.white : brandTextGrey,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Chat',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: _recentsSubTab == 1 ? Colors.white : brandTextGrey,
-                          ),
-                        ),
-                      ],
-                    ),
+                Expanded(
+                  child: _buildRecentsTextTab(
+                    title: 'Chats',
+                    isSelected: _recentsSubTab == 1,
+                    onTap: () {
+                      if (_recentsSubTab != 1) {
+                        setState(() => _recentsSubTab = 1);
+                      }
+                    },
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           
           Expanded(
             child: StreamBuilder<void>(
@@ -1668,7 +1638,7 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        '- ₹${callCost.toStringAsFixed(2)}',
+                                        '- ₹${callCost % 1 == 0 ? callCost.toStringAsFixed(0) : callCost.toStringAsFixed(2)}',
                                         style: const TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w700,
@@ -1806,7 +1776,9 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        '- ₹${amount.toStringAsFixed(2)}',
+                                        amount < 1.0
+                                            ? '- ${(amount * 100).round()}paisa'
+                                            : '- ₹${amount % 1 == 0 ? amount.toStringAsFixed(0) : amount.toStringAsFixed(2)}',
                                         style: const TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w700,

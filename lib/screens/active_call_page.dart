@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -1666,26 +1667,16 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
                         ),
                       ],
                     ),
-                    const SizedBox(height: 50),
+                    const SizedBox(height: 44),
                     
-                    // End call button
-                    GestureDetector(
-                      onTap: _triggerHangup,
-                      child: Container(
-                        width: 76,
-                        height: 76,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.red,
-                        ),
-                        child: const Icon(
-                          Icons.call_end_rounded,
-                          color: Colors.white,
-                          size: 36,
-                        ),
+                    // Interactive Slide to End Call Slider
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: SlideToEndCallButton(
+                        onSlideComplete: _triggerHangup,
                       ),
                     ),
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 28),
                   ],
                 ),
             ],
@@ -1997,6 +1988,237 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
                         spreadRadius: 2,
                       ),
                     ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Interactive Slide to End Call Button
+/// Replaces the static red button with an intuitive swipe-to-hangup slider.
+class SlideToEndCallButton extends StatefulWidget {
+  final VoidCallback onSlideComplete;
+  final double height;
+
+  const SlideToEndCallButton({
+    super.key,
+    required this.onSlideComplete,
+    this.height = 64.0,
+  });
+
+  @override
+  State<SlideToEndCallButton> createState() => _SlideToEndCallButtonState();
+}
+
+class _SlideToEndCallButtonState extends State<SlideToEndCallButton>
+    with TickerProviderStateMixin {
+  double _dragOffset = 0.0;
+  bool _isCompleted = false;
+
+  late AnimationController _springController;
+  late Animation<double> _springAnimation;
+
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _springController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 0.35, end: 0.95).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _springController.dispose();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details, double maxDrag) {
+    if (_isCompleted) return;
+    setState(() {
+      _dragOffset = (_dragOffset + details.delta.dx).clamp(0.0, maxDrag);
+    });
+  }
+
+  void _onDragEnd(DragEndDetails details, double maxDrag) {
+    if (_isCompleted) return;
+    final progress = maxDrag > 0 ? (_dragOffset / maxDrag) : 0.0;
+    if (progress >= 0.78) {
+      // Reached completion threshold
+      setState(() {
+        _isCompleted = true;
+        _dragOffset = maxDrag;
+      });
+      HapticFeedback.heavyImpact();
+      widget.onSlideComplete();
+    } else {
+      // Snap back smoothly with spring physics
+      _springAnimation = Tween<double>(
+        begin: _dragOffset,
+        end: 0.0,
+      ).animate(
+        CurvedAnimation(parent: _springController, curve: Curves.easeOutCubic),
+      )..addListener(() {
+          setState(() {
+            _dragOffset = _springAnimation.value;
+          });
+        });
+      _springController.forward(from: 0.0);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const thumbPadding = 4.0;
+    final thumbSize = widget.height - (thumbPadding * 2);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final totalWidth = constraints.maxWidth;
+        final maxDrag = (totalWidth - thumbSize - (thumbPadding * 2)).clamp(0.0, double.infinity);
+        final progress = maxDrag > 0 ? (_dragOffset / maxDrag).clamp(0.0, 1.0) : 0.0;
+
+        return Container(
+          width: totalWidth,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(widget.height / 2),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF261014),
+                Color(0xFF19090B),
+              ],
+            ),
+            border: Border.all(
+              color: Colors.red.withValues(alpha: 0.45 + (0.35 * progress)),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.red.withValues(alpha: 0.2 + (0.2 * progress)),
+                blurRadius: 16,
+                spreadRadius: 1,
+              ),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              // Active sliding progress fill behind thumb
+              Container(
+                width: _dragOffset + thumbSize + thumbPadding,
+                height: widget.height,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(widget.height / 2),
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.red.withValues(alpha: 0.4),
+                      Colors.red.withValues(alpha: 0.15),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Animated "Slide to end call" track text + pulsing chevrons
+              Center(
+                child: Opacity(
+                  opacity: (1.0 - (progress * 1.4)).clamp(0.0, 1.0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(width: 44), // Offset slightly to account for the thumb
+                      Text(
+                        'Slide to end call',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      AnimatedBuilder(
+                        animation: _pulseAnimation,
+                        builder: (context, child) {
+                          return Opacity(
+                            opacity: _pulseAnimation.value,
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 20),
+                                Icon(Icons.chevron_right_rounded, color: Colors.white70, size: 20),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Draggable Red Thumb
+              Positioned(
+                left: thumbPadding + _dragOffset,
+                top: thumbPadding,
+                child: GestureDetector(
+                  onHorizontalDragUpdate: (details) => _onDragUpdate(details, maxDrag),
+                  onHorizontalDragEnd: (details) => _onDragEnd(details, maxDrag),
+                  onHorizontalDragCancel: () => _onDragEnd(DragEndDetails(), maxDrag),
+                  child: Container(
+                    width: thumbSize,
+                    height: thumbSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFFFF3B30),
+                          Color(0xFFDC2626),
+                          Color(0xFF991B1B),
+                        ],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.55),
+                          blurRadius: 14,
+                          spreadRadius: 2,
+                        ),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.call_end_rounded,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
                   ),
                 ),
               ),

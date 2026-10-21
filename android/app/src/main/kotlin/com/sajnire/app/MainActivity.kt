@@ -10,6 +10,9 @@ import android.content.Intent
 import android.content.IntentSender
 import android.os.Build
 import android.view.WindowManager
+import android.widget.Toast
+import java.io.File
+import kotlin.system.exitProcess
 import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
 import com.google.android.gms.auth.api.identity.Identity
 import io.flutter.embedding.android.FlutterActivity
@@ -83,8 +86,71 @@ class MainActivity : FlutterActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
+    private fun isEmulator(): Boolean {
+        val fingerPrint = Build.FINGERPRINT.lowercase()
+        val model = Build.MODEL.lowercase()
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+        val device = Build.DEVICE.lowercase()
+        val product = Build.PRODUCT.lowercase()
+        val hardware = Build.HARDWARE.lowercase()
+        val board = Build.BOARD.lowercase()
+        val bootloader = Build.BOOTLOADER.lowercase()
+
+        return (brand.startsWith("generic") && device.startsWith("generic"))
+                || fingerPrint.startsWith("generic")
+                || fingerPrint.startsWith("unknown")
+                || fingerPrint.contains("google_sdk")
+                || fingerPrint.contains("emulator")
+                || fingerPrint.contains("simulator")
+                || fingerPrint.contains("vbox")
+                || (fingerPrint.contains("test-keys") && (model.contains("google_sdk") || model.contains("emulator")))
+                || hardware.contains("goldfish")
+                || hardware.contains("ranchu")
+                || hardware.contains("vbox86")
+                || hardware.contains("nox")
+                || hardware.contains("bst")
+                || model.contains("google_sdk")
+                || model.contains("emulator")
+                || model.contains("android sdk built for x86")
+                || model.contains("droid4x")
+                || model.contains("tiantian")
+                || manufacturer.contains("genymotion")
+                || manufacturer.contains("bluestacks")
+                || manufacturer.contains("bignox")
+                || manufacturer.contains("nox")
+                || product.contains("sdk_google")
+                || product.contains("google_sdk")
+                || product.contains("sdk")
+                || product.contains("sdk_x86")
+                || product.contains("sdk_gphone64_arm64")
+                || product.contains("vbox86p")
+                || product.contains("emulator")
+                || product.contains("simulator")
+                || product.contains("nox")
+                || product.contains("bluestacks")
+                || board.contains("nox")
+                || bootloader.contains("nox")
+                || File("/dev/socket/qemud").exists()
+                || File("/dev/qemu_pipe").exists()
+                || File("/system/bin/androVM-prop").exists()
+                || File("/system/bin/microvirt-prop").exists()
+                || File("/system/bin/nox-prop").exists()
+                || File("/system/bin/ttVM-prop").exists()
+    }
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        if (isEmulator()) {
+            Toast.makeText(
+                this,
+                "This application cannot be run on a PC emulator.",
+                Toast.LENGTH_LONG
+            ).show()
+            finishAffinity()
+            exitProcess(0)
+            return
+        }
         turnScreenOnAndShowWhenLocked()
         initialCallRoomId = extractCallRoomId(intent)
     }
