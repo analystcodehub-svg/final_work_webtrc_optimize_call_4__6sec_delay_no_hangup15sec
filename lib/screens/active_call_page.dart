@@ -69,11 +69,13 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   Timer? _availabilityTimer;
   Timer? _availabilityTicker;
   Timer? _countdownTicker;
+  Timer? _iceDisconnectTimer;
   int _availabilityCountdown = 4;
 
   bool _isMuted = false;
   bool _isSpeakerOn = false;
   bool _isHangingUp = false;
+  bool _isHangupHandled = false;
 
   late bool _isFreeIntroCall;
   int _maxDurationSeconds = 60;
@@ -182,7 +184,7 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
       app: FirebaseDatabase.instance.app,
       databaseURL: effectiveDbUrl,
     ).ref('calls/$roomId/status').onValue.listen((event) {
-      if (!mounted || _isHangingUp) return;
+      if (!mounted || _isHangingUp || _isHangupHandled) return;
       if (event.snapshot.exists && event.snapshot.value != null) {
         final status = event.snapshot.value.toString();
         debugPrint('[ActiveCallPage] calls/$roomId status updated: $status');
@@ -196,7 +198,7 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
           _vibrateTimer?.cancel();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Call cancelled by caller')),
+              const SnackBar(content: Text('Call ended')),
             );
             _hangupLocal();
           }
@@ -214,6 +216,8 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     _availabilityTicker?.cancel();
     _ringingTimer?.cancel();
     _countdownTicker?.cancel();
+    _iceDisconnectTimer?.cancel();
+    _iceDisconnectTimer = null;
 
     setState(() {
       _isConnected = true;
@@ -222,7 +226,17 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
       _statusMessage = 'Connected';
     });
 
+    // Cancel onDisconnect in RTDB so screen-off or background socket drop NEVER deletes room
+    if (_roomId != null) {
+      _callService.cancelOnDisconnect(_roomId!);
+    }
+
+    // Assert speakerphone immediately, at 500ms, and at 1500ms to override any Android audio mode resets
+    Helper.setSpeakerphoneOn(true);
     Future.delayed(const Duration(milliseconds: 500), () {
+      Helper.setSpeakerphoneOn(true);
+    });
+    Future.delayed(const Duration(milliseconds: 1500), () {
       Helper.setSpeakerphoneOn(true);
     });
 
@@ -234,10 +248,26 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     if (!mounted || _isHangingUp) return;
     debugPrint('[ActiveCallPage] WebRTC ICE State: $state');
 
-    // Only hang up on terminal failure (actual connection loss/failure).
-    // Do NOT hang up on transient Disconnected state (which happens during screen-off, power save, or NAT re-routes).
-    if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
+    if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+        state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+      // ICE connection is healthy: cancel any running disconnect grace timer
+      _iceDisconnectTimer?.cancel();
+      _iceDisconnectTimer = null;
+    } else if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+      // 6-second internet disconnect rule: If either user's internet is turned off for 6s, hang up
+      if (_iceDisconnectTimer == null || !_iceDisconnectTimer!.isActive) {
+        debugPrint('[ActiveCallPage] ICE Disconnected detected. Starting 6-second grace timer...');
+        _iceDisconnectTimer = Timer(const Duration(seconds: 6), () {
+          if (mounted && !_isHangingUp) {
+            debugPrint('[ActiveCallPage] 6 seconds elapsed in Disconnected state. Terminating call due to network loss.');
+            _triggerHangup();
+          }
+        });
+      }
+    } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed ||
         state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
+      _iceDisconnectTimer?.cancel();
+      _iceDisconnectTimer = null;
       debugPrint('[ActiveCallPage] Terminal WebRTC failure ($state) -> Ending call.');
       _triggerHangup();
     }
@@ -609,6 +639,7 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   }
 
   void _onCallEndedCallback() {
+    if (_isHangupHandled) return;
     if (!_isConnected && widget.isCaller && _isFreeIntroCall && !_isHangingUp) {
       final lastStatus = _callService.lastCallStatus;
       debugPrint('[ActiveCallPage] Call ended before connection (status: $lastStatus). Triggering auto-matchmaking fallback...');
@@ -921,12 +952,7 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   }
 
   void _triggerHangup() {
-    _isHangingUp = true;
-    _availabilityTimer?.cancel();
-    _availabilityTicker?.cancel();
-    _ringingTimer?.cancel();
-    _countdownTicker?.cancel();
-    _roomStatusSub?.cancel();
+    if (_isHangupHandled) return;
     if (_roomId != null) {
       _callService.endCall(_roomId!);
     }
@@ -934,10 +960,28 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   }
 
   void _hangupLocal() {
+    if (_isHangupHandled) return;
+    _isHangupHandled = true;
+    _isHangingUp = true;
+
+    // Immediately stop audio & vibration and cancel all timers/listeners
     FlutterRingtonePlayer().stop();
     _vibrateTimer?.cancel();
-    if (_isHangingUp && _timer == null && _duration > 0) return;
-    _isHangingUp = true;
+    _vibrateTimer = null;
+    _iceDisconnectTimer?.cancel();
+    _iceDisconnectTimer = null;
+    _roomStatusSub?.cancel();
+    _roomStatusSub = null;
+    _timer?.cancel();
+    _timer = null;
+    _ringingTimer?.cancel();
+    _ringingTimer = null;
+    _availabilityTimer?.cancel();
+    _availabilityTimer = null;
+    _availabilityTicker?.cancel();
+    _availabilityTicker = null;
+    _countdownTicker?.cancel();
+    _countdownTicker = null;
     
     // Clear CallKit Native Notifications
     dismissCallKitScreen();
@@ -945,9 +989,6 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     // Unlock both parties safely (unlockUserFromCall checks experts collection internally)
     _callService.unlockUserFromCall(widget.callerId);
     _callService.unlockUserFromCall(_currentReceiverId);
-    
-    _timer?.cancel();
-    _ringingTimer?.cancel();
     
     final int finalDuration = _duration;
     final status = finalDuration > 0 ? 'ended' : 'missed';
@@ -1035,7 +1076,11 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     
     if (mounted) {
       widget.onCallEnded?.call();
-      Navigator.pop(context);
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      } else {
+        Navigator.of(context).pushReplacementNamed('/');
+      }
     }
   }
 
@@ -1212,6 +1257,8 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   void dispose() {
     FlutterRingtonePlayer().stop();
     _vibrateTimer?.cancel();
+    _iceDisconnectTimer?.cancel();
+    _iceDisconnectTimer = null;
     _timer?.cancel();
     _ringingTimer?.cancel();
     _availabilityTimer?.cancel();

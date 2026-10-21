@@ -67,6 +67,10 @@ class CallService {
       {
         'urls': [
           'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+          'stun:stun2.l.google.com:19302',
+          'stun:stun3.l.google.com:19302',
+          'stun:stun4.l.google.com:19302',
         ]
       },
       {
@@ -159,6 +163,9 @@ class CallService {
 
       // 3. Add local track to connection
       _localStream!.getTracks().forEach((track) {
+        if (track.kind == 'audio') {
+          track.enabled = true;
+        }
         _peerConnection!.addTrack(track, _localStream!);
       });
 
@@ -166,11 +173,19 @@ class CallService {
       _peerConnection!.onTrack = (RTCTrackEvent event) {
         if (event.streams.isNotEmpty) {
           _remoteStream = event.streams[0];
+          for (var track in _remoteStream!.getAudioTracks()) {
+            track.enabled = true;
+          }
           onRemoteStreamListener?.call(_remoteStream!);
+        } else {
+          event.track.enabled = true;
         }
       };
       _peerConnection!.onAddStream = (MediaStream stream) {
         _remoteStream = stream;
+        for (var track in _remoteStream!.getAudioTracks()) {
+          track.enabled = true;
+        }
         onRemoteStreamListener?.call(_remoteStream!);
       };
 
@@ -188,7 +203,7 @@ class CallService {
       final DatabaseReference roomRef = _database.ref('calls').push();
       final String roomId = roomRef.key!;
       
-      // Ensure the room is deleted if the caller disconnects abruptly
+      // Ensure the room is deleted if the caller disconnects abruptly before connection
       await roomRef.onDisconnect().remove();
 
       // 6. Handle local ICE candidates and upload them
@@ -203,7 +218,10 @@ class CallService {
       };
 
       // 7. Generate SDP Offer
-      final RTCSessionDescription offer = await _peerConnection!.createOffer();
+      final RTCSessionDescription offer = await _peerConnection!.createOffer({
+        'offerToReceiveAudio': true,
+        'offerToReceiveVideo': false,
+      });
       await _peerConnection!.setLocalDescription(offer);
 
       // 8. Upload SDP Offer to call document
@@ -226,7 +244,10 @@ class CallService {
       // 9. Subscribe to call document updates to catch SDP Answer
       final roomSub = roomRef.onValue.listen((event) async {
         if (event.snapshot.value == null) {
-          onCallEndedListener?.call();
+          // If already connected, do not hang up on temporary null snapshot from background socket drop!
+          if (!remoteDescriptionSet) {
+            onCallEndedListener?.call();
+          }
           return;
         }
 
@@ -258,9 +279,21 @@ class CallService {
 
           // Add all queued remote candidates
           for (var candidate in pendingRemoteCandidates) {
-            await _peerConnection!.addCandidate(candidate);
+            try {
+              await _peerConnection!.addCandidate(candidate);
+            } catch (e) {
+              debugPrint('[CallService] Error adding candidate: $e');
+            }
           }
           pendingRemoteCandidates.clear();
+
+          // Cancel onDisconnect on roomRef now that connection is established!
+          try {
+            await roomRef.onDisconnect().cancel();
+            debugPrint('[CallService] Caller cancelled onDisconnect for room: $roomId');
+          } catch (e) {
+            debugPrint('[CallService] Error cancelling onDisconnect: $e');
+          }
         }
       });
       _subscriptions.add(roomSub);
@@ -271,16 +304,20 @@ class CallService {
           .onChildAdded
           .listen((event) async {
         if (event.snapshot.value != null && _peerConnection != null) {
-          final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-          final candidate = RTCIceCandidate(
-            data['candidate'],
-            data['sdpMid'],
-            data['sdpMLineIndex'],
-          );
-          if (remoteDescriptionSet) {
-            await _peerConnection!.addCandidate(candidate);
-          } else {
-            pendingRemoteCandidates.add(candidate);
+          try {
+            final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+            final candidate = RTCIceCandidate(
+              data['candidate'],
+              data['sdpMid'],
+              data['sdpMLineIndex'],
+            );
+            if (remoteDescriptionSet) {
+              await _peerConnection!.addCandidate(candidate);
+            } else {
+              pendingRemoteCandidates.add(candidate);
+            }
+          } catch (e) {
+            debugPrint('[CallService] Caller addCandidate error (non-fatal): $e');
           }
         }
       });
@@ -344,6 +381,9 @@ class CallService {
 
       // 3. Add local track to connection
       _localStream!.getTracks().forEach((track) {
+        if (track.kind == 'audio') {
+          track.enabled = true;
+        }
         _peerConnection!.addTrack(track, _localStream!);
       });
 
@@ -351,11 +391,19 @@ class CallService {
       _peerConnection!.onTrack = (RTCTrackEvent event) {
         if (event.streams.isNotEmpty) {
           _remoteStream = event.streams[0];
+          for (var track in _remoteStream!.getAudioTracks()) {
+            track.enabled = true;
+          }
           onRemoteStreamListener?.call(_remoteStream!);
+        } else {
+          event.track.enabled = true;
         }
       };
       _peerConnection!.onAddStream = (MediaStream stream) {
         _remoteStream = stream;
+        for (var track in _remoteStream!.getAudioTracks()) {
+          track.enabled = true;
+        }
         onRemoteStreamListener?.call(_remoteStream!);
       };
 
@@ -393,22 +441,29 @@ class CallService {
       final candidatesSub = roomRef
           .child('callerCandidates')
           .onChildAdded
-          .listen((event) {
+          .listen((event) async {
         if (event.snapshot.value != null && _peerConnection != null) {
-          final data = Map<String, dynamic>.from(event.snapshot.value as Map);
-          _peerConnection!.addCandidate(
-            RTCIceCandidate(
-              data['candidate'],
-              data['sdpMid'],
-              data['sdpMLineIndex'],
-            ),
-          );
+          try {
+            final data = Map<String, dynamic>.from(event.snapshot.value as Map);
+            await _peerConnection!.addCandidate(
+              RTCIceCandidate(
+                data['candidate'],
+                data['sdpMid'],
+                data['sdpMLineIndex'],
+              ),
+            );
+          } catch (e) {
+            debugPrint('[WebRTC] Receiver addCandidate error (non-fatal): $e');
+          }
         }
       });
       _subscriptions.add(candidatesSub);
 
       // 7. Generate SDP Answer
-      final RTCSessionDescription answer = await _peerConnection!.createAnswer();
+      final RTCSessionDescription answer = await _peerConnection!.createAnswer({
+        'offerToReceiveAudio': true,
+        'offerToReceiveVideo': false,
+      });
       await _peerConnection!.setLocalDescription(answer);
 
       // 8. Update RTDB document with SDP Answer and change status to connected
@@ -420,11 +475,19 @@ class CallService {
         'status': 'connected',
       });
 
+      // Cancel onDisconnect on roomRef so receiver screen sleep never deletes room
+      try {
+        await roomRef.onDisconnect().cancel();
+        debugPrint('[CallService] Receiver cancelled onDisconnect for $callRoomId');
+      } catch (e) {
+        debugPrint('[CallService] Receiver error cancelling onDisconnect: $e');
+      }
+
       // 9. Subscribe to call document updates to monitor ended state
       final roomSub = roomRef.child('status').onValue.listen((event) {
         final val = event.snapshot.value?.toString();
-        if (event.snapshot.value == null ||
-            val == 'ended' ||
+        // Do NOT trigger onCallEnded if snapshot is null (happens when socket drops on sleep)
+        if (val == 'ended' ||
             val == 'rejected' ||
             val == 'rejected_offline' ||
             val == 'rejected_blocked') {
@@ -436,6 +499,17 @@ class CallService {
       debugPrint('Error accepting WebRTC call: $e');
       await disposeCall();
       rethrow;
+    }
+  }
+
+  /// Cancels any scheduled onDisconnect actions for this call room on Firebase RTDB.
+  Future<void> cancelOnDisconnect(String roomId) async {
+    try {
+      final DatabaseReference roomRef = _database.ref('calls/$roomId');
+      await roomRef.onDisconnect().cancel();
+      debugPrint('[CallService] Cancelled onDisconnect for calls/$roomId');
+    } catch (e) {
+      debugPrint('[CallService] Error cancelling onDisconnect for $roomId: $e');
     }
   }
 
@@ -459,21 +533,30 @@ class CallService {
           await unlockUserFromCall(receiverId);
         }
         
-        // Update room status to ended and remove node
+        // Update room status to ended and schedule node removal
         try {
           await roomRef.update({'status': 'ended'});
           await roomRef.onDisconnect().cancel();
-          await roomRef.remove();
+          // Delay node removal by 4 seconds so the remote client reliably receives 'status': 'ended'
+          Future.delayed(const Duration(seconds: 4), () async {
+            try {
+              await roomRef.remove();
+            } catch (_) {}
+          });
         } catch (e) {
-          debugPrint('Could not remove room (might be deleted or permission denied): $e');
+          debugPrint('Could not update/remove room: $e');
         }
       } else {
         try {
           await roomRef.update({'status': 'ended'});
           await roomRef.onDisconnect().cancel();
-          await roomRef.remove();
+          Future.delayed(const Duration(seconds: 4), () async {
+            try {
+              await roomRef.remove();
+            } catch (_) {}
+          });
         } catch (e) {
-          debugPrint('Could not remove room: $e');
+          debugPrint('Could not update/remove room: $e');
         }
       }
     } catch (e) {

@@ -30,6 +30,12 @@ android {
     lint {
         checkReleaseBuilds = false
         abortOnError = false
+        checkDependencies = false
+    }
+
+    buildFeatures {
+        renderScript = false
+        shaders = false
     }
 
     signingConfigs {
@@ -60,6 +66,7 @@ android {
         release {
             isMinifyEnabled = isBuildingBundle
             isShrinkResources = isBuildingBundle
+            isCrunchPngs = isBuildingBundle
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
