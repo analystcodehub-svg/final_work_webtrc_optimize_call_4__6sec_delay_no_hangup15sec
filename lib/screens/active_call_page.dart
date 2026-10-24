@@ -1015,12 +1015,13 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     final otherUid = widget.isCaller ? _currentReceiverId : widget.callerId;
 
     // Save profile into local SQLite so male user sees female in Recent Calls screen
+    final otherRole = widget.isCaller ? 'expert' : 'user';
     LocalChatDatabase.instance.saveUserProfile({
       'uid': otherUid,
       'name': resolvedOtherName,
       'avatarUrl': _displayAvatarUrl ?? widget.avatarUrl ?? '',
       'avatarIndex': _displayAvatarIndex,
-      'role': widget.isCaller ? 'user' : 'expert',
+      'role': otherRole,
       'timestamp': timestamp,
     });
 

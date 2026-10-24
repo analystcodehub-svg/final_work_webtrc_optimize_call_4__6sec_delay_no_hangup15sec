@@ -4,6 +4,7 @@ import '../theme/app_colors.dart';
 import '../providers/app_state.dart';
 import '../services/local_chat_database.dart';
 import '../services/user_database_service.dart';
+import 'hybrid_chat_screen.dart';
 class RecentSessionsScreen extends StatefulWidget {
   const RecentSessionsScreen({super.key});
 
@@ -39,28 +40,13 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
       
       try {
         if (otherUserId.isNotEmpty) {
-          final cachedProfile = await LocalChatDatabase.instance.getUserProfile(otherUserId);
-          if (cachedProfile != null) {
-            displayName = cachedProfile['name'] as String? ?? otherUserId;
-          } else {
-            final profileData = isCaller
-                ? await UserDatabaseService.instance.getExpert(otherUserId)
-                : await UserDatabaseService.instance.getUser(otherUserId);
-            if (profileData != null) {
-              final nick = profileData['nickname']?.toString().trim() ?? '';
-              final name = profileData['name']?.toString().trim() ?? '';
-              displayName = nick.isNotEmpty ? nick : (name.isNotEmpty ? name : otherUserId);
-              
-              await LocalChatDatabase.instance.saveUserProfile({
-                'uid': otherUserId,
-                'name': displayName,
-                'avatarUrl': profileData['profileImageUrl'] ?? profileData['avatarUrl'],
-                'avatarIndex': profileData['avatarIndex'] ?? 1,
-                'role': isCaller ? 'expert' : 'user',
-                'timestamp': DateTime.now().millisecondsSinceEpoch,
-              });
-            }
-          }
+          final profile = await LocalChatDatabase.instance.getEnrichedProfile(
+            otherUserId,
+            defaultRole: isCaller ? 'expert' : 'user',
+          );
+          displayName = profile['name'] ?? otherUserId;
+          map['avatarUrl'] = profile['avatarUrl'];
+          map['avatarIndex'] = profile['avatarIndex'] ?? 1;
         }
       } catch (e) {
         // Ignore errors, fallback to default
@@ -199,6 +185,7 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
                           }
 
                           return _buildCallCard(
+                            currentUserId: currentUserId,
                             name: displayName,
                             timeText: timeText,
                             duration: durationText,
@@ -206,6 +193,8 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
                             isMissed: isMissed,
                             otherUserId: otherUserId,
                             isCaller: isCaller,
+                            avatarUrl: data['avatarUrl'] as String?,
+                            avatarIndex: (data['avatarIndex'] as num?)?.toInt() ?? 1,
                           );
                         },
                       );
@@ -239,6 +228,7 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
   }
 
   Widget _buildCallCard({
+    required String currentUserId,
     required String name,
     required String timeText,
     required String duration,
@@ -246,6 +236,8 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
     required bool isMissed,
     required String otherUserId,
     required bool isCaller,
+    String? avatarUrl,
+    int avatarIndex = 1,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -317,25 +309,11 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
             ),
           ),
 
-          // Actions
+          // Actions (Earned Amount + Message Button below it)
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              /*
-              GestureDetector(
-                onTap: () => _triggerCall(context, otherUserId, !isCaller),
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryBlue,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: const Icon(Icons.phone, color: Colors.white),
-                ),
-              ),
-              const SizedBox(height: 8),
-              */
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
@@ -356,6 +334,37 @@ class _RecentSessionsScreenState extends State<RecentSessionsScreen> {
                       : (cost == 'Rs 0' || cost == '₹0')
                         ? AppColors.textGrey
                         : AppColors.successGreen,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () {
+                  if (otherUserId.trim().isEmpty) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => HybridChatScreen(
+                        myUid: currentUserId,
+                        otherUid: otherUserId,
+                        otherUserName: name,
+                        otherUserAvatarUrl: avatarUrl,
+                        otherUserAvatarIndex: avatarIndex,
+                      ),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppColors.lightBlueBg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.chat_bubble_rounded,
+                    color: AppColors.primaryBlue,
+                    size: 18,
                   ),
                 ),
               ),

@@ -131,7 +131,12 @@ class AppState extends ChangeNotifier {
 
   void setOnlineStatus(bool online) {
     _isOnline = online;
-    SharedPreferences.getInstance().then((prefs) => prefs.setBool('isExpertOnline', online));
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool('isExpertOnline', online);
+      if (online) {
+        prefs.setBool('isAppSwipedAway', false);
+      }
+    });
     notifyListeners();
   }
 

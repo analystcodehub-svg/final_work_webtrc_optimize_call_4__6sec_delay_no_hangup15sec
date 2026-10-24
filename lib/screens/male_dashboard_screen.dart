@@ -1,4 +1,3 @@
-import "../utils/permission_helper.dart";
 import "package:flutter/services.dart";
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -22,7 +21,6 @@ import 'chat_list_screen.dart';
 import 'hybrid_chat_screen.dart';
 
 import 'expert_feed_screen.dart';
-import '../utils/auto_start_helper.dart';
 import '../services/foreground_task_service.dart';
 import '../services/local_chat_database.dart';
 import '../services/user_database_service.dart';
@@ -63,41 +61,14 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
       final map = Map<String, dynamic>.from(data);
       final expertId = map['receiverId'] == uid ? map['callerId'] : map['receiverId'];
       
-      String displayName = expertId;
-      String? avatarUrl;
-      int avatarIndex = 1;
+      final profile = await LocalChatDatabase.instance.getEnrichedProfile(
+        expertId,
+        defaultRole: 'expert',
+      );
       
-      try {
-        final cachedProfile = await LocalChatDatabase.instance.getUserProfile(expertId);
-        if (cachedProfile != null) {
-          displayName = cachedProfile['name'] as String? ?? expertId;
-          avatarUrl = cachedProfile['avatarUrl'] as String?;
-          avatarIndex = (cachedProfile['avatarIndex'] as num?)?.toInt() ?? 1;
-        } else {
-          final expertData = await UserDatabaseService.instance.getExpert(expertId);
-          if (expertData != null) {
-            displayName = expertData['nickname'] ?? expertData['name'] ?? expertId;
-            avatarUrl = expertData['profileImageUrl'] ?? expertData['avatarUrl'];
-            avatarIndex = (expertData['avatarIndex'] as num?)?.toInt() ?? 1;
-            
-            // Save to local cache
-            await LocalChatDatabase.instance.saveUserProfile({
-              'uid': expertId,
-              'name': displayName,
-              'avatarUrl': avatarUrl,
-              'avatarIndex': avatarIndex,
-              'role': 'expert',
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            });
-          }
-        }
-      } catch (e) {
-        // Ignore errors, fallback to default
-      }
-      
-      map['enrichedName'] = displayName;
-      map['enrichedAvatarUrl'] = avatarUrl;
-      map['enrichedAvatarIndex'] = avatarIndex;
+      map['enrichedName'] = profile['name'] ?? expertId;
+      map['enrichedAvatarUrl'] = profile['avatarUrl'];
+      map['enrichedAvatarIndex'] = profile['avatarIndex'] ?? 1;
       map['expertId'] = expertId;
       enriched.add(map);
     }
@@ -111,44 +82,14 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
       final map = Map<String, dynamic>.from(data);
       final otherUid = (map['otherUid'] ?? '').toString();
       
-      String displayName = (map['otherUserName'] as String?)?.isNotEmpty == true 
-          ? map['otherUserName'] as String 
-          : otherUid;
-      String? avatarUrl = map['otherAvatarUrl'] as String?;
-      int avatarIndex = (map['otherAvatarIndex'] as num?)?.toInt() ?? 1;
+      final profile = await LocalChatDatabase.instance.getEnrichedProfile(
+        otherUid,
+        defaultRole: 'expert',
+      );
       
-      try {
-        final cachedProfile = await LocalChatDatabase.instance.getUserProfile(otherUid);
-        if (cachedProfile != null) {
-          displayName = cachedProfile['name'] as String? ?? displayName;
-          avatarUrl = cachedProfile['avatarUrl'] as String? ?? avatarUrl;
-          avatarIndex = (cachedProfile['avatarIndex'] as num?)?.toInt() ?? avatarIndex;
-        } else if (otherUid.isNotEmpty) {
-          final expertData = await UserDatabaseService.instance.getExpert(otherUid);
-          if (expertData != null) {
-            displayName = expertData['nickname'] ?? expertData['name'] ?? displayName;
-            avatarUrl = expertData['profileImageUrl'] ?? expertData['avatarUrl'] ?? avatarUrl;
-            avatarIndex = (expertData['avatarIndex'] as num?)?.toInt() ?? avatarIndex;
-            
-            // Save to local cache
-            await LocalChatDatabase.instance.saveUserProfile({
-              'uid': otherUid,
-              'name': displayName,
-              'avatarUrl': avatarUrl,
-              'avatarIndex': avatarIndex,
-              'role': 'expert',
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            });
-          }
-        }
-      } catch (e) {
-        // Ignore errors, fallback to default
-      }
-      
-      map['enrichedName'] = displayName;
-      map['enrichedAvatarUrl'] = avatarUrl;
-      map['enrichedAvatarIndex'] = avatarIndex;
-      map['otherUid'] = otherUid;
+      map['enrichedName'] = profile['name'] ?? otherUid;
+      map['enrichedAvatarUrl'] = profile['avatarUrl'] ?? map['otherAvatarUrl'];
+      map['enrichedAvatarIndex'] = profile['avatarIndex'] ?? map['otherAvatarIndex'] ?? 1;
       enriched.add(map);
     }
     return enriched;
@@ -202,22 +143,12 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
         _updateUnreadCount(myUid);
       });
       
-      // Check for auto-start permissions (Infinix, Xiaomi, etc.)
-      AutoStartHelper.checkAndRequestAutoStart(context);
-      
-      // Check and request notification permissions gracefully via bottom sheet
-      PermissionHelper.checkAndRequestNotificationPermission(context);
+      // Check notification permission and show bottom sheet if disabled
+      _checkAndPromptNotification();
       
       // Keep app alive in background (always ON for male users)
       ForegroundTaskService.startService();
     });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _checkNotificationPermission();
-    }
   }
 
   Future<void> _checkNotificationPermission() async {
@@ -230,6 +161,54 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
       }
     } catch (e) {
       debugPrint('[MALE_DASH] checkNotificationPermission error: $e');
+    }
+  }
+
+  Future<void> _checkAndPromptNotification({bool force = false}) async {
+    try {
+      final status = await Permission.notification.status;
+      if (status.isGranted) {
+        if (mounted && !_isNotificationPermissionGranted) {
+          setState(() {
+            _isNotificationPermissionGranted = true;
+          });
+        }
+        return;
+      }
+
+      if (mounted && _isNotificationPermissionGranted) {
+        setState(() {
+          _isNotificationPermissionGranted = false;
+        });
+      }
+
+      // 1. If not permanently denied, trigger the Android NATIVE bottom-up popup directly!
+      // This shows the system prompt: "Allow SajniRe to send you notifications? [Don't allow] [Allow]"
+      // When the user taps 'Allow', notifications turn ON directly without opening Settings!
+      if (!status.isPermanentlyDenied) {
+        final newStatus = await Permission.notification.request();
+        if (mounted && _isNotificationPermissionGranted != newStatus.isGranted) {
+          setState(() {
+            _isNotificationPermissionGranted = newStatus.isGranted;
+          });
+        }
+        return;
+      }
+
+      // 2. If permanently denied (disabled in phone Settings):
+      // Only open settings if the user explicitly clicked "चालू करें" (force == true)
+      if (force && mounted) {
+        openAppSettings();
+      }
+    } catch (e) {
+      debugPrint('[MALE_DASH] checkAndPromptNotification error: $e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkAndPromptNotification();
     }
   }
 
@@ -783,6 +762,9 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
             setState(() {
               _currentTab = index;
             });
+            if (!_isNotificationPermissionGranted) {
+              _checkAndPromptNotification();
+            }
           },
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
@@ -876,13 +858,8 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
           ),
           const SizedBox(width: 8),
           ElevatedButton(
-            onPressed: () async {
-              final status = await Permission.notification.request();
-              if (status.isGranted) {
-                if (mounted) setState(() => _isNotificationPermissionGranted = true);
-              } else {
-                openAppSettings();
-              }
+            onPressed: () {
+              _checkAndPromptNotification(force: true);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFFD97706),

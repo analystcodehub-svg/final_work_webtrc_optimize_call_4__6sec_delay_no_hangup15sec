@@ -184,8 +184,9 @@ class LocalChatDatabase {
     return '';
   }
 
-  // ==== USER PROFILES CACHE ====
+  // ==== USER PROFILES CACHE & ONLINE FALLBACK ====
   Future<Map<String, dynamic>?> getUserProfile(String uid) async {
+    if (uid.isEmpty) return null;
     final db = await instance.database;
     final result = await db.query(
       'user_profiles',
@@ -196,6 +197,96 @@ class LocalChatDatabase {
       return result.first;
     }
     return null;
+  }
+
+  /// Retrieves profile from local cache. If missing or if avatarUrl is empty/null,
+  /// fetches fresh data from online (RTDB/Firestore) and saves back into local cache!
+  Future<Map<String, dynamic>> getEnrichedProfile(String uid, {String defaultRole = 'expert'}) async {
+    if (uid.isEmpty) {
+      return {'uid': uid, 'name': uid, 'avatarUrl': null, 'avatarIndex': 1, 'role': defaultRole};
+    }
+
+    // 1. Try local cache first
+    try {
+      final cached = await getUserProfile(uid);
+      final cachedAvatar = cached?['avatarUrl']?.toString().trim();
+      final cachedName = cached?['name']?.toString().trim();
+
+      // If local cache has both a valid name and a non-empty avatarUrl, return immediately!
+      if (cached != null &&
+          cachedAvatar != null &&
+          cachedAvatar.isNotEmpty &&
+          cachedName != null &&
+          cachedName.isNotEmpty &&
+          cachedName != uid) {
+        return Map<String, dynamic>.from(cached);
+      }
+    } catch (e) {
+      debugPrint('[LocalChatDatabase] Error reading profile cache for $uid: $e');
+    }
+
+    // 2. If avatarUrl was null/empty or local profile was missing: FETCH FROM ONLINE!
+    try {
+      Map<String, dynamic>? onlineData;
+      if (defaultRole == 'expert') {
+        onlineData = await UserDatabaseService.instance.getExpert(uid);
+        onlineData ??= await UserDatabaseService.instance.getUser(uid);
+      } else {
+        onlineData = await UserDatabaseService.instance.getUser(uid);
+        onlineData ??= await UserDatabaseService.instance.getExpert(uid);
+      }
+
+      if (onlineData != null) {
+        String resolvedName = (onlineData['nickname'] ??
+                onlineData['name'] ??
+                onlineData['displayName'] ??
+                onlineData['fullName'] ??
+                uid)
+            .toString()
+            .trim();
+        if (resolvedName.isEmpty) resolvedName = uid;
+
+        String? resolvedAvatar = (onlineData['profileImageUrl'] ??
+                onlineData['avatarUrl'] ??
+                onlineData['photoUrl'])
+            ?.toString()
+            .trim();
+        if (resolvedAvatar != null && resolvedAvatar.isEmpty) resolvedAvatar = null;
+
+        int resolvedIndex = (onlineData['avatarIndex'] as num?)?.toInt() ?? 1;
+        String resolvedRole = onlineData['role']?.toString().trim() ?? defaultRole;
+
+        final profileMap = {
+          'uid': uid,
+          'name': resolvedName,
+          'avatarUrl': resolvedAvatar,
+          'avatarIndex': resolvedIndex,
+          'role': resolvedRole,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        };
+
+        // 3. STORE IN LOCAL STORAGE AGAIN!
+        await saveUserProfile(profileMap);
+
+        return profileMap;
+      }
+    } catch (e) {
+      debugPrint('[LocalChatDatabase] Error fetching online profile fallback for $uid: $e');
+    }
+
+    // 4. Return whatever local cache had (or fallback defaults)
+    final fallbackCached = await getUserProfile(uid);
+    if (fallbackCached != null) {
+      return Map<String, dynamic>.from(fallbackCached);
+    }
+
+    return {
+      'uid': uid,
+      'name': uid,
+      'avatarUrl': null,
+      'avatarIndex': 1,
+      'role': defaultRole,
+    };
   }
 
   Future<void> saveUserProfile(Map<String, dynamic> profile) async {

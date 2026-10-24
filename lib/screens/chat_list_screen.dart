@@ -76,79 +76,18 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       final data = Map<String, dynamic>.from(doc);
       final otherUser = data['otherUserId'] as String;
       
-      String displayName = otherUser;
-      
-      // If current user is male, the other user must be an expert (female avatar).
-      // If current user is female, the other user must be a user (male avatar).
-      String role = isCurrentMale ? 'expert' : 'user';
+      // If current user is male, other user is expert (female). If female, other user is user (male).
+      final String expectedRole = isCurrentMale ? 'expert' : 'user';
 
-      try {
-        final cachedProfile = await LocalChatDatabase.instance.getUserProfile(otherUser);
-        if (cachedProfile != null) {
-          displayName = cachedProfile['name'] as String? ?? otherUser;
-          data['avatarUrl'] = cachedProfile['avatarUrl'];
-          data['avatarIndex'] = cachedProfile['avatarIndex'] ?? 1;
-        } else {
-          // Try experts first
-          final expertData = await UserDatabaseService.instance.getExpert(otherUser);
-          if (expertData != null) {
-            String? eName = expertData['nickname']?.toString().trim();
-            if (eName == null || eName.isEmpty) eName = expertData['name']?.toString().trim();
-            if (eName == null || eName.isEmpty) eName = expertData['displayName']?.toString().trim();
-            if (eName == null || eName.isEmpty) eName = expertData['fullName']?.toString().trim();
-            
-            if (eName != null && eName.isNotEmpty) {
-              displayName = eName;
-            }
+      final profile = await LocalChatDatabase.instance.getEnrichedProfile(
+        otherUser,
+        defaultRole: expectedRole,
+      );
 
-            data['avatarUrl'] = expertData['profileImageUrl'] ?? expertData['avatarUrl'];
-            data['avatarIndex'] = (expertData['avatarIndex'] as num?)?.toInt() ?? 1;
-            
-            await LocalChatDatabase.instance.saveUserProfile({
-              'uid': otherUser,
-              'name': displayName,
-              'avatarUrl': data['avatarUrl'],
-              'avatarIndex': data['avatarIndex'],
-              'role': 'expert',
-              'timestamp': DateTime.now().millisecondsSinceEpoch,
-            });
-          } else {
-            // Try users
-            final userData = await UserDatabaseService.instance.getUser(otherUser);
-            if (userData != null) {
-              String? uName = userData['nickname']?.toString().trim();
-              if (uName == null || uName.isEmpty) uName = userData['name']?.toString().trim();
-              if (uName == null || uName.isEmpty) uName = userData['displayName']?.toString().trim();
-              if (uName == null || uName.isEmpty) uName = userData['fullName']?.toString().trim();
-              
-              if (uName != null && uName.isNotEmpty) {
-                displayName = uName;
-              } else {
-                displayName = otherUser;
-              }
-              
-              data['avatarUrl'] = userData['avatarUrl'];
-              data['avatarIndex'] = (userData['avatarIndex'] as num?)?.toInt() ?? 1;
-              
-              await LocalChatDatabase.instance.saveUserProfile({
-                'uid': otherUser,
-                'name': displayName,
-                'avatarUrl': data['avatarUrl'],
-                'avatarIndex': data['avatarIndex'],
-                'role': 'user',
-                'timestamp': DateTime.now().millisecondsSinceEpoch,
-              });
-            } else {
-              displayName = otherUser;
-            }
-          }
-        }
-      } catch (e) {
-        displayName = otherUser; // Show UID as-is on error
-      }
-      
-      data['displayName'] = displayName;
-      data['role'] = role;
+      data['displayName'] = profile['name'] ?? otherUser;
+      data['avatarUrl'] = profile['avatarUrl'];
+      data['avatarIndex'] = profile['avatarIndex'] ?? 1;
+      data['role'] = profile['role'] ?? expectedRole;
       enrichedDocs.add(data);
     }
     

@@ -23,6 +23,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import '../firebase_options.dart';
 import 'call_service.dart';
 import 'block_service.dart';
@@ -49,6 +50,46 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     debugPrint('[BG Handler] data: ${message.data}');
     final data = message.data;
     final type = data['type'] ?? '';
+
+    // Gate check for Female Expert:
+    // Only accept incoming calls and messages if:
+    // 1. Online toggle is ON (isExpertOnline == true)
+    // 2. App was NOT swiped away (!isAppSwipedAway)
+    // 3. Background service is actively running (isBgServiceRunning == true)
+    final prefs = await SharedPreferences.getInstance();
+    final userRole = prefs.getString('userRole')?.toLowerCase() ?? '';
+    final isExpertOnline = prefs.getBool('isExpertOnline') ?? false;
+    final isAppSwipedAway = prefs.getBool('isAppSwipedAway') ?? false;
+
+    bool isBgServiceRunning = false;
+    try {
+      isBgServiceRunning = await FlutterBackgroundService().isRunning();
+    } catch (_) {}
+
+    debugPrint('[BG Handler] userRole=$userRole, isExpertOnline=$isExpertOnline, isAppSwipedAway=$isAppSwipedAway, isBgServiceRunning=$isBgServiceRunning');
+
+    if (userRole == 'female') {
+      if (!isExpertOnline || isAppSwipedAway || !isBgServiceRunning) {
+        debugPrint('[BG Handler] Female expert is OFFLINE or app was swiped away. Suppressing $type.');
+        if (type == 'call') {
+          // Reject call in RTDB immediately so male caller is not left waiting
+          final callRoomId = data['callRoomId'] ?? '';
+          final dbUrl = data['dbUrl'] as String? ?? 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
+          if (callRoomId.isNotEmpty) {
+            try {
+              final rtdb = FirebaseDatabase.instanceFor(
+                app: Firebase.app(),
+                databaseURL: dbUrl,
+              );
+              await rtdb.ref('calls/$callRoomId').update({'status': 'rejected_offline'});
+            } catch (e) {
+              debugPrint('[BG Handler] Failed to update call status to rejected_offline: $e');
+            }
+          }
+        }
+        return; // Suppress notification / CallKit completely!
+      }
+    }
 
     if (type == 'call') {
       await _showCallkitIncoming(data);

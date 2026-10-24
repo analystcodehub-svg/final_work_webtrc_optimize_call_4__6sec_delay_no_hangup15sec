@@ -18,33 +18,68 @@ class LocalAvatarWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String assetPath;
-    
-    ImageProvider imageProvider;
+    final double size = radius * 2;
+    final int safeIndex = (avatarIndex >= 1 && avatarIndex <= 6) ? avatarIndex : 1;
+    final String assetPath = role == 'expert'
+        ? 'assets/avatars/female_$safeIndex.png'
+        : 'assets/avatars/male_$safeIndex.png';
 
-    final int targetDim = (radius * 2.5).toInt().clamp(48, 256);
+    final hasNetworkImage = avatarUrl != null && avatarUrl!.trim().isNotEmpty;
 
-    if (avatarUrl != null && avatarUrl!.isNotEmpty) {
-      imageProvider = ResizeImage(
-        NetworkImage(avatarUrl!),
-        width: targetDim,
-        height: targetDim,
-        allowUpscaling: false,
-      );
-    } else {
-      assetPath = role == 'expert' ? 'assets/avatars/female_$avatarIndex.png' : 'assets/avatars/male_$avatarIndex.png';
-      imageProvider = ResizeImage(
-        AssetImage(assetPath),
-        width: targetDim,
-        height: targetDim,
-        allowUpscaling: false,
+    if (hasNetworkImage) {
+      return ClipOval(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Image.network(
+            avatarUrl!.trim(),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) {
+              return Image.asset(
+                assetPath,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    width: size,
+                    height: size,
+                    color: Colors.grey.shade200,
+                    child: Icon(
+                      role == 'expert' ? Icons.face_3_rounded : Icons.person_rounded,
+                      size: radius * 1.2,
+                      color: Colors.grey.shade400,
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
       );
     }
 
-    return CircleAvatar(
-      radius: radius,
-      backgroundImage: imageProvider,
-      backgroundColor: Colors.grey[200],
+    return ClipOval(
+      child: Image.asset(
+        assetPath,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return Container(
+            width: size,
+            height: size,
+            color: Colors.grey.shade200,
+            child: Icon(
+              role == 'expert' ? Icons.face_3_rounded : Icons.person_rounded,
+              size: radius * 1.2,
+              color: Colors.grey.shade400,
+            ),
+          );
+        },
+      ),
     );
   }
 }

@@ -110,15 +110,20 @@ class MainActivity : FlutterActivity() {
                 || hardware.contains("vbox86")
                 || hardware.contains("nox")
                 || hardware.contains("bst")
+                || hardware.contains("qemu")
+                || hardware.contains("ttvm")
                 || model.contains("google_sdk")
                 || model.contains("emulator")
                 || model.contains("android sdk built for x86")
                 || model.contains("droid4x")
                 || model.contains("tiantian")
+                || model.contains("andy")
+                || model.contains("mumu")
                 || manufacturer.contains("genymotion")
                 || manufacturer.contains("bluestacks")
                 || manufacturer.contains("bignox")
                 || manufacturer.contains("nox")
+                || manufacturer.contains("mumu")
                 || product.contains("sdk_google")
                 || product.contains("google_sdk")
                 || product.contains("sdk")
@@ -129,6 +134,7 @@ class MainActivity : FlutterActivity() {
                 || product.contains("simulator")
                 || product.contains("nox")
                 || product.contains("bluestacks")
+                || product.contains("mumu")
                 || board.contains("nox")
                 || bootloader.contains("nox")
                 || File("/dev/socket/qemud").exists()
@@ -137,6 +143,10 @@ class MainActivity : FlutterActivity() {
                 || File("/system/bin/microvirt-prop").exists()
                 || File("/system/bin/nox-prop").exists()
                 || File("/system/bin/ttVM-prop").exists()
+                || File("/system/bin/bstfolder").exists()
+                || File("/data/data/com.bluestacks.home").exists()
+                || File("/data/data/com.bignox.app").exists()
+                || File("/data/data/com.microvirt.tools").exists()
     }
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
@@ -226,6 +236,14 @@ class MainActivity : FlutterActivity() {
                 result.notImplemented()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("flutter.isAppSwipedAway", false).apply()
+        } catch (_: Exception) {}
     }
 
     override fun onNewIntent(intent: Intent) {

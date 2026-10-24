@@ -101,6 +101,12 @@ android {
             enableSplit = true
         }
     }
+
+    packaging {
+        jniLibs {
+            excludes.addAll(listOf("lib/x86/**", "lib/x86_64/**"))
+        }
+    }
 }
 
 kotlin {
