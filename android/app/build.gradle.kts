@@ -71,6 +71,9 @@ android {
             isMinifyEnabled = isBuildingBundle
             isShrinkResources = isBuildingBundle
             isCrunchPngs = isBuildingBundle
+            ndk {
+                debugSymbolLevel = "none"
+            }
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
