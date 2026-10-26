@@ -498,6 +498,9 @@ class _ExpertHomeScreenState extends State<ExpertHomeScreen>
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Color(0xFFE2E8F0),
       ),
       child: Scaffold(
         backgroundColor: Colors.white, // Status bar background

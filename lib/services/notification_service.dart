@@ -68,7 +68,8 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
     debugPrint('[BG Handler] userRole=$userRole, isExpertOnline=$isExpertOnline, isAppSwipedAway=$isAppSwipedAway, isBgServiceRunning=$isBgServiceRunning');
 
-    if (userRole == 'female') {
+    final isFreeIntro = data['isFreeIntroCall'] == 'true' || data['isFreeIntroCall'] == true;
+    if (userRole == 'female' && !isFreeIntro) {
       if (!isExpertOnline || isAppSwipedAway || !isBgServiceRunning) {
         debugPrint('[BG Handler] Female expert is OFFLINE or app was swiped away. Suppressing $type.');
         if (type == 'call') {
@@ -336,16 +337,16 @@ Future<void> showCallNotificationWithActions(
       importance: Importance.max,
       priority: Priority.high,
       category: AndroidNotificationCategory.call,
-      fullScreenIntent: true,
+      fullScreenIntent: !isFreeIntro,
       ongoing: true,
       autoCancel: false,
       largeIcon: const DrawableResourceAndroidBitmap('ic_female_avatar'),
       color: const Color(0xFF10B981),
       actions: <AndroidNotificationAction>[
-        const AndroidNotificationAction(
+        AndroidNotificationAction(
           'action_accept',
-          'Accept',
-          titleColor: Color(0xFF10B981),
+          isFreeIntro ? 'Receive' : 'Accept',
+          titleColor: const Color(0xFF10B981),
           showsUserInterface: true,
           cancelNotification: true,
         ),
@@ -593,14 +594,56 @@ Future<void> _showCallkitIncoming(Map<String, dynamic> data) async {
   }
   debugPrint('[CallKit] isMale: $isMale, notificationsEnabled: $notificationsEnabled');
 
-  // Smart Fallback Logic:
-  // - If notifications are ON: male screen shows ONLY calling notification banner (no full display takeover).
-  // - If notifications are OFF / blocked: Smart Fallback triggers full-screen CallKit display so the user doesn't miss the call!
-  // - Female experts: ALWAYS full-screen display (never notification).
-  final shouldShowCallKit = !isMale || !notificationsEnabled;
-
-  if (shouldShowCallKit) {
-    debugPrint('[CallKit] Showing full-screen CallKit display (female or notifications disabled fallback)');
+  if (isFreeIntro) {
+    // For free intro calls in background / killed state: show ONLY notification with Receive and Decline options
+    debugPrint('[CallKit] Free intro call in bg/killed state: showing ONLY notification with Receive/Decline buttons via CallKit heads-up banner');
+    final introParams = CallKitParams(
+      id: uuid,
+      nameCaller: callerName,
+      appName: 'SajniRe',
+      handle: '1 Min Free Intro Call',
+      type: 0,
+      duration: 15000, // Strictly 15s timeout
+      extra: <String, dynamic>{
+        'callRoomId': callRoomId,
+        'callerName': callerName,
+        'callerId': callerId,
+        'dbUrl': dbUrl,
+        'isFreeIntroCall': true,
+        'maxDurationSeconds': 60,
+      },
+      headers: <String, dynamic>{'platform': 'android'},
+      android: const AndroidParams(
+        isCustomNotification: true,
+        isShowLogo: false,
+        isShowCallID: true,
+        ringtonePath: 'system_ringtone_default',
+        backgroundColor: '#0A0A0A',
+        actionColor: '#10B981',
+        textColor: '#ffffff',
+        isShowFullLockedScreen: false,
+        isImportant: true,
+        isFullScreen: false, // NOT FULL SCREEN: Shows heads-up notification banner with Receive & Decline
+        textAccept: 'Receive',
+        textDecline: 'Decline',
+      ),
+      ios: const IOSParams(
+        iconName: 'CallKitLogo',
+        handleType: '',
+        supportsVideo: false,
+        maximumCallGroups: 1,
+        maximumCallsPerCallGroup: 1,
+        supportsDTMF: false,
+        supportsHolding: false,
+        supportsGrouping: false,
+        supportsUngrouping: false,
+        ringtonePath: 'system_ringtone_default',
+      ),
+    );
+    await FlutterCallkitIncoming.showCallkitIncoming(introParams);
+  } else {
+    // Regular paid calls (completely untouched):
+    debugPrint('[CallKit] Showing full-screen CallKit display and playing ringtone');
     FlutterRingtonePlayer().play(
       android: AndroidSounds.ringtone,
       ios: IosSounds.glass,
@@ -609,11 +652,6 @@ Future<void> _showCallkitIncoming(Map<String, dynamic> data) async {
       asAlarm: true,
     );
     await FlutterCallkitIncoming.showCallkitIncoming(params);
-  }
-
-  // Show calling notification with Accept and Decline actions ONLY for male users!
-  // Female experts must NEVER see the call on notification (always full-screen display).
-  if (isMale) {
     await showCallNotificationWithActions(
       data,
       callerName,
@@ -637,7 +675,7 @@ Future<void> _showCallkitIncoming(Map<String, dynamic> data) async {
     }
   });
 
-  // Listen for remote call termination using the CORRECT database instance!
+  // Listen for remote call termination using the active database instance!
   StreamSubscription? rtdbSub;
   if (callRoomId.isNotEmpty) {
     rtdbSub = FirebaseDatabase.instanceFor(
@@ -668,8 +706,9 @@ Future<void> _showCallkitIncoming(Map<String, dynamic> data) async {
     });
   }
 
-  // Failsafe timer: 36 seconds
-  Timer(const Duration(seconds: 36), () {
+  // Failsafe timer: 16 seconds for free intro, 36 seconds for paid call
+  final failsafeSeconds = isFreeIntro ? 16 : 36;
+  Timer(Duration(seconds: failsafeSeconds), () {
     FlutterRingtonePlayer().stop();
     dismissCallKitScreen();
     if (!completer.isCompleted) completer.complete();
@@ -845,27 +884,6 @@ class NotificationService {
         debugPrint('[FCM] Firestore token sync error: $e');
       }
 
-      // 3. For males (users), ALSO sync token to zegochat-c44b0-1e689 intro calls pool & buckets!
-      if (collection == 'users') {
-        try {
-          final introDb = FirebaseDatabase.instanceFor(
-            app: Firebase.app(),
-            databaseURL: 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app',
-          );
-          await introDb.ref('male_users/$userId/fcmToken').set(token);
-          await introDb.ref('new_males_pool/$userId/fcmToken').set(token);
-          
-          final poolSnap = await introDb.ref('new_males_pool/$userId/languageKey').get();
-          if (poolSnap.exists && poolSnap.value != null) {
-            final langKey = poolSnap.value.toString();
-            await introDb.ref('new_males_buckets/$langKey/$userId/fcmToken').set(token);
-          }
-          await introDb.ref('new_males_buckets/all/$userId/fcmToken').set(token);
-        } catch (e) {
-          debugPrint('[FCM] Intro DB token sync error: $e');
-        }
-      }
-
       debugPrint('[FCM] Token saved → $collection/$userId');
 
       // Auto-refresh when token rotates
@@ -881,22 +899,6 @@ class NotificationService {
           }, SetOptions(merge: true));
         } catch (_) {}
 
-        if (collection == 'users') {
-          try {
-            final introDb = FirebaseDatabase.instanceFor(
-              app: Firebase.app(),
-              databaseURL: 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app',
-            );
-            await introDb.ref('male_users/$userId/fcmToken').set(t);
-            await introDb.ref('new_males_pool/$userId/fcmToken').set(t);
-            final poolSnap = await introDb.ref('new_males_pool/$userId/languageKey').get();
-            if (poolSnap.exists && poolSnap.value != null) {
-              final langKey = poolSnap.value.toString();
-              await introDb.ref('new_males_buckets/$langKey/$userId/fcmToken').set(t);
-            }
-            await introDb.ref('new_males_buckets/all/$userId/fcmToken').set(t);
-          } catch (_) {}
-        }
         debugPrint('[FCM] Token refreshed → $collection/$userId');
       });
     } catch (e) {
@@ -915,6 +917,12 @@ class NotificationService {
     // We trust the backend and just process the notification.
 
     if (type == 'call') {
+      final isFreeIntro = data['isFreeIntroCall'] == 'true' || data['isFreeIntroCall'] == true;
+      if (isFreeIntro) {
+        // For free intro calls: In app foreground, in-app incoming call screen handles it directly via RTDB listener - don't show notification
+        debugPrint('[FCM] Foreground free intro call received. In app foreground dont show notification.');
+        return;
+      }
       debugPrint('[FCM] Foreground call received, displaying Native CallKit screen directly.');
       await _showCallkitIncoming(data);
     } else if (type == 'message') {
@@ -1065,32 +1073,6 @@ class NotificationService {
     String? storedDbUrl = prefs.getString('dbUrl_$callRoomId');
     bool storedIsFreeIntro = prefs.getBool('isFreeIntroCall_$callRoomId') ?? false;
 
-    // Failsafe for killed state: if dbUrl or callerId was not found in cache, verify if room exists on 1e689
-    if (storedDbUrl == null || storedDbUrl.isEmpty || resolvedCallerId.isEmpty) {
-      try {
-        final introSnap = await FirebaseDatabase.instanceFor(
-          app: Firebase.app(),
-          databaseURL: 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app',
-        ).ref('calls/$callRoomId').get();
-        if (introSnap.exists && introSnap.value != null) {
-          storedDbUrl = 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app';
-          storedIsFreeIntro = true;
-          if (introSnap.value is Map) {
-            final roomData = Map<String, dynamic>.from(introSnap.value as Map);
-            if (resolvedCallerId.isEmpty && roomData['callerId'] != null) {
-              resolvedCallerId = roomData['callerId'].toString();
-            }
-            if ((resolvedName == 'Unknown' || resolvedName == 'Female Expert') && roomData['callerName'] != null) {
-              resolvedName = roomData['callerName'].toString();
-            }
-          }
-          debugPrint('[CallKit] Failsafe resolved 1e689 database for room: $callRoomId (caller: $resolvedCallerId)');
-        }
-      } catch (e) {
-        debugPrint('[CallKit] Error checking intro db failsafe: $e');
-      }
-    }
-
     int retries = 0;
     void pushRoute() {
       final state = navigatorKey?.currentState;
@@ -1154,12 +1136,14 @@ class NotificationService {
         if (callRoomId.isNotEmpty) {
           try {
             final prefs = await SharedPreferences.getInstance();
-            final storedDbUrl = prefs.getString('dbUrl_$callRoomId');
+            final storedDbUrl = prefs.getString('dbUrl_$callRoomId') ??
+                'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
             await CallService(databaseURL: storedDbUrl).endCall(callRoomId);
           } catch (e) {
             debugPrint('[CallKit] RTDB error: $e');
           }
         }
+        await dismissCallKitScreen();
       } else if (event is CallEventActionCallTimeout) {
         final callRoomId = event.id;
         debugPrint('[CallKit] Call timed out: $callRoomId');

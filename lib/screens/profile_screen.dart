@@ -27,6 +27,7 @@ class ProfileScreen extends StatelessWidget {
         statusBarBrightness: Brightness.light,
         systemNavigationBarColor: Colors.white,
         systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Color(0xFFE2E8F0),
       ),
       child: Scaffold(
         backgroundColor: AppColors.bgLight,

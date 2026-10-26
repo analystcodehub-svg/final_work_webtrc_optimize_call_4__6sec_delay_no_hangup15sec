@@ -12,7 +12,6 @@ import '../services/call_service.dart';
 import '../services/local_chat_database.dart';
 import '../services/block_service.dart';
 import '../services/user_database_service.dart';
-import '../services/new_male_service.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 import 'package:vibration/vibration.dart';
 import '../services/notification_service.dart';
@@ -71,7 +70,8 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   Timer? _availabilityTicker;
   Timer? _countdownTicker;
   Timer? _iceDisconnectTimer;
-  int _availabilityCountdown = 4;
+  int _availabilityCountdown = 7;
+  bool _isRemoteRingingConfirmed = false;
 
   bool _isMuted = false;
   bool _isSpeakerOn = false;
@@ -87,9 +87,6 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
 
   // Dynamic candidate matchmaking state for intro calls
   late String _currentReceiverId;
-  final Set<String> _triedReceiverUids = {};
-  int _fallbackAttempts = 0;
-  bool _isSwitchingCandidate = false;
   String _statusMessage = 'Searching availability...';
 
   // Availability checking state (4 seconds round animation)
@@ -112,7 +109,9 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     // Keep screen ON for entire call duration (prevents black screen on proximity)
     WakelockPlus.enable();
     _currentReceiverId = widget.receiverId;
-    _triedReceiverUids.add(widget.receiverId);
+    if (_currentReceiverId.isEmpty) {
+      _currentReceiverId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    }
     _roomId = widget.callRoomId;
     _isFreeIntroCall = widget.isFreeIntroCall;
     // null means unlimited — call ends only when male runs out of coins, not by timer
@@ -128,9 +127,7 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     )..repeat();
 
     final effectiveDbUrl = widget.callDatabaseURL ??
-        (widget.isFreeIntroCall
-            ? 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app'
-            : 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app');
+        'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
     _callService = widget.preStartedCallService ?? CallService(databaseURL: effectiveDbUrl);
     
     if (widget.callerCoinBalance != null && widget.callerCoinBalance! > 0) {
@@ -157,7 +154,8 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     
     if (_isFreeIntroCall && widget.isCaller) {
       _isAvailabilityChecking = true;
-      _availabilityCountdown = 4;
+      _availabilityCountdown = 7;
+      _isRemoteRingingConfirmed = false;
     }
 
     _initRenderersAndCall();
@@ -177,9 +175,7 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   void _subscribeToRoomStatus(String roomId) {
     _roomStatusSub?.cancel();
     final effectiveDbUrl = widget.callDatabaseURL ??
-        (widget.isFreeIntroCall
-            ? 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app'
-            : 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app');
+        'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
 
     _roomStatusSub = FirebaseDatabase.instanceFor(
       app: FirebaseDatabase.instance.app,
@@ -277,23 +273,20 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
   void _onRemoteRingingReceived() {
     if (!mounted || _isConnected || _isHangingUp) return;
 
-    // If availability search is still in progress, let the 4-second animation complete
-    // before transitioning to the 15s ringing screen.
-    if (_isAvailabilityChecking && _availabilityCountdown > 0) {
-      debugPrint('[ActiveCallPage] Remote ringing confirmed during availability check. Will transition after 4s animation.');
-      return;
-    }
+    _isRemoteRingingConfirmed = true;
+    debugPrint('[ActiveCallPage] Remote ringing CONFIRMED for $_displayName!');
 
     if (!_isAvailabilityChecking && _ringingTimer != null && _ringingTimer!.isActive) {
       return;
     }
 
-    debugPrint('[ActiveCallPage] Switching from 4s availability to 15s ringing countdown.');
+    debugPrint('[ActiveCallPage] Ringing verified! Switching immediately from availability check to 15s ringing countdown.');
     _availabilityTimer?.cancel();
     _availabilityTicker?.cancel();
 
     setState(() {
       _isAvailabilityChecking = false;
+      _availabilityCountdown = 0;
       _statusMessage = 'Ringing $_displayName...';
     });
 
@@ -305,10 +298,11 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     _availabilityTicker?.cancel();
     _ringingTimer?.cancel();
     _countdownTicker?.cancel();
+    _isRemoteRingingConfirmed = false;
 
     setState(() {
       _isAvailabilityChecking = true;
-      _availabilityCountdown = 4;
+      _availabilityCountdown = 7;
       _statusMessage = 'Searching availability for $_displayName...';
     });
 
@@ -326,16 +320,23 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
       });
     });
 
-    _availabilityTimer = Timer(const Duration(seconds: 4), () {
+    _availabilityTimer = Timer(const Duration(seconds: 7), () {
       _availabilityTicker?.cancel();
       if (!mounted || _isConnected || _isHangingUp) return;
 
-      debugPrint('[ActiveCallPage] 4s availability search finished for $_displayName. Transitioning to 15s ringing screen...');
+      // ── CRITICAL CHECK: Did remote phone confirm ringing within 7s? ──
+      if (!_isRemoteRingingConfirmed) {
+        debugPrint('[ActiveCallPage] 7s availability check expired with NO ringing confirmed for $_displayName. Auto-connecting to next candidate immediately!');
+        _handleUnreachableOrTimeout(reason: 'unreachable');
+        return;
+      }
+
+      debugPrint('[ActiveCallPage] 7s availability search finished and ringing was confirmed for $_displayName. Transitioning to 15s ringing screen...');
       setState(() {
         _isAvailabilityChecking = false;
         _availabilityCountdown = 0;
       });
-      _onRemoteRingingReceived();
+      _startRingingCountdownAndTimeout(15);
     });
   }
 
@@ -421,7 +422,6 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
               'callerAvatar': 'assets/avatars/female_$femaleAvatarIndex.png',
               'callerAvatarIndex': femaleAvatarIndex,
               'callerLanguage': femaleLang,
-              'dbUrl': NewMaleService.newDbUrl,
             };
           }
 
@@ -470,29 +470,13 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
 
       if (widget.callRoomId != null) {
         try {
-          String callDbUrl = widget.callDatabaseURL ??
-              (_isFreeIntroCall
-                  ? 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app'
-                  : 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app');
-          FirebaseDatabase database = FirebaseDatabase.instanceFor(
+          final String callDbUrl = widget.callDatabaseURL ??
+              'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
+          final FirebaseDatabase database = FirebaseDatabase.instanceFor(
             app: FirebaseDatabase.instance.app,
             databaseURL: callDbUrl,
           );
-          var callDoc = await database.ref('calls/${widget.callRoomId}').get();
-          if (!callDoc.exists && callDbUrl != 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app') {
-            final fallbackDb = FirebaseDatabase.instanceFor(
-              app: FirebaseDatabase.instance.app,
-              databaseURL: 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app',
-            );
-            final fallbackDoc = await fallbackDb.ref('calls/${widget.callRoomId}').get();
-            if (fallbackDoc.exists) {
-              callDoc = fallbackDoc;
-              database = fallbackDb;
-              callDbUrl = 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app';
-              _isFreeIntroCall = true;
-              if (mounted) setState(() {});
-            }
-          }
+          final callDoc = await database.ref('calls/${widget.callRoomId}').get();
           if (callDoc.exists) {
             final data = Map<String, dynamic>.from(callDoc.value as Map);
             actualCallerId = data['callerId'] ?? actualCallerId;
@@ -619,180 +603,18 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
 
   void _handleCallAttended() {
     if (_callAttendedRecorded) return;
-    // Only mark attended if call is actually connected and audio streamed for at least 5 seconds
     if (!_isConnected || _duration < 5) return;
     _callAttendedRecorded = true;
-
-    if (_isFreeIntroCall) {
-      // In female intro call: Male is receiver, Female is caller
-      final maleUid = _currentReceiverId;
-      final femaleUid = widget.callerId;
-      final fName = _displayName.isNotEmpty ? _displayName : widget.nickname;
-
-      NewMaleService.instance.markCallAttended(
-        maleUid: maleUid,
-        femaleUid: femaleUid,
-        femaleName: fName,
-        durationSeconds: _duration,
-      );
-      debugPrint('[ActiveCallPage] Male $maleUid attended call with $fName ($_duration s). Removed from bucket.');
-    }
   }
 
   void _onCallEndedCallback() {
     if (_isHangupHandled) return;
-    if (!_isConnected && widget.isCaller && _isFreeIntroCall && !_isHangingUp) {
-      final lastStatus = _callService.lastCallStatus;
-      debugPrint('[ActiveCallPage] Call ended before connection (status: $lastStatus). Triggering auto-matchmaking fallback...');
-      _handleUnreachableOrTimeout(reason: lastStatus ?? 'unreachable');
-    } else {
-      _hangupLocal();
-    }
+    _hangupLocal();
   }
 
   Future<void> _handleUnreachableOrTimeout({required String reason}) async {
-    if (_isHangingUp || _isConnected || _isSwitchingCandidate) return;
-
-    // Mark current male as unreachable/offline in isolated pool
-    NewMaleService.instance.markMaleUnreachable(_currentReceiverId);
-
-    // Only auto-reroute for intro calls (up to 3 candidate attempts)
-    if (_isFreeIntroCall && widget.isCaller && _fallbackAttempts < 3) {
-      _fallbackAttempts++;
-      final prevName = _displayName;
-      setState(() {
-        _isSwitchingCandidate = true;
-        _statusMessage = '$prevName unreachable. Connecting to next user...';
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '$prevName unreachable. Connecting to next user...',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            duration: const Duration(seconds: 3),
-            backgroundColor: const Color(0xFFE11D48),
-          ),
-        );
-      }
-
-      // Dispose current room and WebRTC state
-      _availabilityTimer?.cancel();
-      _availabilityTicker?.cancel();
-      _ringingTimer?.cancel();
-      _countdownTicker?.cancel();
-      _roomStatusSub?.cancel();
-      if (_roomId != null) {
-        _callService.endCall(_roomId!);
-      }
-      await _callService.disposeCall();
-
-      // Find next eligible candidate speaking female's language
-      final femaleLang = widget.callerLanguage ??
-          (mounted ? context.read<AppState>().primaryLanguage : null) ??
-          'Hindi';
-
-      final nextMale = await NewMaleService.instance.pickRandomMale(
-        _triedReceiverUids,
-        femaleLanguage: femaleLang,
-      );
-
-      if (!mounted || _isHangingUp) return;
-
-      if (nextMale != null) {
-        final nextUid = nextMale['uid'] as String;
-        _triedReceiverUids.add(nextUid);
-
-        setState(() {
-          _currentReceiverId = nextUid;
-          _displayName = nextMale['nickname'] as String? ?? 'User';
-          _displayAvatarUrl = nextMale['avatarUrl'] as String?;
-          _displayAvatarIndex = (nextMale['avatarIndex'] as num?)?.toInt() ?? 1;
-          _isSwitchingCandidate = false;
-          _isAvailabilityChecking = true;
-          _availabilityCountdown = 4;
-          _statusMessage = 'Searching availability for $_displayName...';
-        });
-
-        _startAvailabilityCheck();
-
-        // Retrieve fresh FCM token
-        String receiverFcmToken = (nextMale['fcmToken'] as String?)?.trim() ?? '';
-        if (receiverFcmToken.isEmpty) {
-          try {
-            final tSnap = await NewMaleService.instance.maleUsersRef.child(nextUid).child('fcmToken').get();
-            if (tSnap.exists && tSnap.value != null) {
-              receiverFcmToken = tSnap.value.toString().trim();
-            }
-          } catch (_) {}
-        }
-
-        try {
-          final femaleNick = mounted ? context.read<AppState>().nickname : 'Female Expert';
-          final femaleAvatarIndex = mounted ? context.read<AppState>().avatarIndex : 1;
-
-          final newRoomId = await _callService.startCall(
-            expertId: nextUid,
-            callerId: widget.callerId,
-            callerCoins: 0,
-            pricePerMin: 0.0,
-            extraRoomData: {
-              'isFreeIntroCall': true,
-              'maxDurationSeconds': 60,
-              'callerName': femaleNick.isNotEmpty ? femaleNick : 'Female Expert',
-              'callerAvatar': 'assets/avatars/female_$femaleAvatarIndex.png',
-              'callerAvatarIndex': femaleAvatarIndex,
-              'callerLanguage': femaleLang,
-              'receiverLanguage': nextMale['language'] ?? 'Hindi',
-              'receiverFcmToken': receiverFcmToken,
-              'dbUrl': NewMaleService.newDbUrl,
-            },
-            onRemoteStream: (stream) {
-              if (mounted) {
-                _markCallConnected();
-              }
-            },
-            onCallEnded: _onCallEndedCallback,
-            onRinging: _onRemoteRingingReceived,
-            onIceConnectionState: _handleIceConnectionState,
-          );
-
-          if (mounted) {
-            setState(() {
-              _roomId = newRoomId;
-            });
-            _subscribeToRoomStatus(newRoomId);
-          }
-          return;
-        } catch (e) {
-          debugPrint('[ActiveCallPage] Error dialing fallback candidate $nextUid: $e');
-        }
-      }
-    }
-
-    if (mounted && !_isHangingUp) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No other users available right now. Please try again later.'),
-          duration: Duration(seconds: 3),
-        ),
-      );
-      _triggerHangup();
-    }
+    if (_isHangingUp || _isConnected) return;
+    _hangupLocal();
   }
 
   Future<void> _initCall() async {
@@ -913,8 +735,8 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
       // Female never auto-hangups; call continues until user presses red button
       // Caller (male) manages coin deductions and balance.
 
-      // Check and deduct balances on every first second of minute start (1s, 61s, 121s, 181s...)
-      if (_duration > 0 && (_duration - 1) % 60 == 0) {
+      // Check and deduct balances on every first second of minute start (1s, 61s, 121s, 181s...) - Regular Paid Calls ONLY
+      if (!_isFreeIntroCall && _duration > 0 && (_duration - 1) % 60 == 0) {
         if (widget.isCaller) {
           final requiredCoins = (widget.pricePerMin * 10).toInt() > 0
               ? (widget.pricePerMin * 10).toInt()
@@ -996,21 +818,6 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final logId = 'log_${_roomId ?? timestamp}';
 
-    // If free intro call, record consumption in new database ONLY if call was actually connected and attended!
-    if (_isFreeIntroCall && _isConnected && finalDuration >= 5) {
-      final maleUid = _currentReceiverId;
-      final femaleUid = widget.callerId;
-      NewMaleService.instance.markFreeCallUsed(
-        maleUid: maleUid,
-        femaleUid: femaleUid,
-        durationSeconds: finalDuration,
-      );
-    } else if (_isFreeIntroCall && (!_isConnected || finalDuration < 5)) {
-      NewMaleService.instance.newMalesPoolRef.child(_currentReceiverId).update({
-        'callStatus': 'available',
-      }).catchError((_) {});
-    }
-    
     final String resolvedOtherName = _displayName.isNotEmpty ? _displayName : widget.nickname;
     final otherUid = widget.isCaller ? _currentReceiverId : widget.callerId;
 
@@ -1277,20 +1084,34 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
 
   @override
   Widget build(BuildContext context) {
+    const callOverlayStyle = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Color(0xFF0F172A),
+      systemNavigationBarIconBrightness: Brightness.light,
+      systemNavigationBarDividerColor: Colors.transparent,
+    );
+
     if (_isAvailabilityChecking && !_isConnected) {
-      return WillPopScope(
-        onWillPop: () async {
-          _triggerHangup();
-          return false;
-        },
-        child: Scaffold(
-          backgroundColor: const Color(0xFF0F172A),
-          body: _buildAvailabilityCheckingView(),
+      return AnnotatedRegion<SystemUiOverlayStyle>(
+        value: callOverlayStyle,
+        child: WillPopScope(
+          onWillPop: () async {
+            _triggerHangup();
+            return false;
+          },
+          child: Scaffold(
+            backgroundColor: const Color(0xFF0F172A),
+            body: _buildAvailabilityCheckingView(),
+          ),
         ),
       );
     }
 
-    return WillPopScope(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: callOverlayStyle,
+      child: WillPopScope(
       onWillPop: () async {
         _triggerHangup();
         return false;
@@ -1685,8 +1506,9 @@ class _ActiveCallPageState extends State<ActiveCallPage> with TickerProviderStat
         ),
       ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildCallActionCircle({
     required IconData icon,

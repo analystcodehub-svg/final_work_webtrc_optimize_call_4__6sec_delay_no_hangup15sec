@@ -229,8 +229,9 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
         statusBarColor: Colors.transparent, // transparent status bar
         statusBarIconBrightness: Brightness.dark, // dark icons for Android
         statusBarBrightness: Brightness.light, // dark icons for iOS
-        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarColor: Colors.white,
         systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Color(0xFFE2E8F0),
       ),
       child: Scaffold(
         body: SafeArea(

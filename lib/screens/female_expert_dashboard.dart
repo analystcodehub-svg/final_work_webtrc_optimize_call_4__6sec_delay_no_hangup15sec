@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
@@ -145,7 +146,16 @@ class _FemaleExpertDashboardState extends State<FemaleExpertDashboard> with Widg
     final appState = context.watch<AppState>();
     final isOnline = appState.isOnline;
 
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Color(0xFFE2E8F0),
+      ),
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Expert Dashboard'),
         centerTitle: true,
@@ -337,6 +347,7 @@ class _FemaleExpertDashboardState extends State<FemaleExpertDashboard> with Widg
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

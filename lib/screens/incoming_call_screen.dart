@@ -42,9 +42,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
   String get _effectiveDatabaseUrl =>
       widget.callDatabaseURL ??
-      (widget.isFreeIntroCall
-          ? 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app'
-          : 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app');
+      'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
 
   Future<Map<String, dynamic>> _fetchCallerData() async {
     Map<String, dynamic> result = {

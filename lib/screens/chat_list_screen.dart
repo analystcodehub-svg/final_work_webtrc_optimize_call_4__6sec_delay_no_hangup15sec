@@ -7,11 +7,6 @@ import '../services/local_chat_database.dart';
 import '../widgets/local_avatar_widget.dart';
 import 'hybrid_chat_screen.dart';
 import '../services/user_database_service.dart';
-import '../services/new_male_service.dart';
-import '../services/call_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_database/firebase_database.dart';
-import 'active_call_page.dart';
 import '../services/matchmaking_service.dart';
 import '../services/foreground_task_service.dart';
 
@@ -22,50 +17,20 @@ class ChatListScreen extends StatefulWidget {
   State<ChatListScreen> createState() => _ChatListScreenState();
 }
 
-class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _ChatListScreenState extends State<ChatListScreen> {
   late String _currentUserMobile;
   late final MatchmakingService _matchingService;
-  Stream<List<Map<String, dynamic>>>? _newMalesStream;
-  int _randomSeed = DateTime.now().millisecondsSinceEpoch;
-  bool _isCallingUser = false;
   final Set<String> _pinnedUids = {};
 
   @override
   void initState() {
     super.initState();
     _matchingService = MatchmakingService();
-    _tabController = TabController(length: 2, vsync: this);
-    final appState = context.read<AppState>();
-    _initNewMalesStream(appState.primaryLanguage);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
     super.dispose();
-  }
-
-  void _initNewMalesStream([String? lang]) {
-    final appState = context.read<AppState>();
-    final effectiveLang = lang ?? appState.primaryLanguage;
-    final stream = NewMaleService.instance.streamNewMales(
-      femaleLanguage: effectiveLang.isNotEmpty ? effectiveLang : 'Hindi',
-      limit: 50,
-      randomSeed: _randomSeed,
-    );
-    if (mounted) {
-      setState(() {
-        _newMalesStream = stream;
-      });
-    } else {
-      _newMalesStream = stream;
-    }
-  }
-
-  void _refreshNewMales([String? lang]) {
-    _randomSeed = DateTime.now().millisecondsSinceEpoch;
-    _initNewMalesStream(lang);
   }
 
   Future<List<Map<String, dynamic>>> _fetchEnrichedChats(String myUid, bool isCurrentMale) async {
@@ -104,108 +69,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     final bool isCurrentMale = appState.selectedGender != 'Female';
     final bool isFemaleOnline = appState.isOnline;
 
-    if (!isCurrentMale) {
-      // ── Female View: FRIENDS and GENERAL Tabs ──
-      return Scaffold(
-        backgroundColor: AppColors.bgLight,
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Top TabBar Header matching exact design
-              Container(
-                color: Colors.white,
-                child: TabBar(
-                  controller: _tabController,
-                  dividerColor: Colors.transparent,
-                  labelColor: const Color(0xFFE11D48),
-                  unselectedLabelColor: const Color(0xFF8E8E93),
-                  labelStyle: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.4,
-                  ),
-                  unselectedLabelStyle: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.4,
-                  ),
-                  indicatorColor: const Color(0xFFE11D48),
-                  indicatorWeight: 3.0,
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  tabs: const [
-                    Tab(text: 'FRIENDS'),
-                    Tab(text: 'GENERAL'),
-                  ],
-                ),
-              ),
-
-              // Offline Warning Banner for Female Expert
-              if (!isFemaleOnline)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFFFF1F2),
-                    border: Border(
-                      bottom: BorderSide(color: Color(0xFFFECDD3), width: 1),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.wifi_off_rounded, color: Color(0xFFE11D48), size: 18),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          "You're offline. Go online to chat & call.",
-                          style: TextStyle(
-                            color: Color(0xFF9F1239),
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: () => _showGoOnlinePrompt(context, appState),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE11D48),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Text(
-                            'Go Online',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-              // Tab Views
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    // Tab 1: FRIENDS (Recent chats - only message)
-                    _buildFriendsTab(context, appState, myUid, isCurrentMale, isOnline: isFemaleOnline),
-
-                    // Tab 2: GENERAL (Uncalled male users with call & message)
-                    _buildGeneralTab(context, appState, myUid, isOnline: isFemaleOnline),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // ── Male View: Standard Chats ──
     return Scaffold(
       backgroundColor: AppColors.bgLight,
       body: SafeArea(
@@ -224,8 +87,60 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
                 ),
               ),
             ),
+            // Offline Warning Banner for Female Expert
+            if (!isCurrentMale && !isFemaleOnline)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFF1F2),
+                  border: Border(
+                    bottom: BorderSide(color: Color(0xFFFECDD3), width: 1),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.wifi_off_rounded, color: Color(0xFFE11D48), size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        "You're offline. Go online to chat & call.",
+                        style: TextStyle(
+                          color: Color(0xFF9F1239),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => _showGoOnlinePrompt(context, appState),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE11D48),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Text(
+                          'Go Online',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Expanded(
-              child: _buildFriendsTab(context, appState, myUid, isCurrentMale, isOnline: true),
+              child: _buildFriendsTab(
+                context,
+                appState,
+                myUid,
+                isCurrentMale,
+                isOnline: isCurrentMale ? true : isFemaleOnline,
+              ),
             ),
           ],
         ),
@@ -323,108 +238,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
         );
       },
     );
-  }
-
-  // ─── TAB 2: GENERAL (Uncalled Male Users) ─────────────────────────────────
-
-  Widget _buildGeneralTab(
-    BuildContext context,
-    AppState appState,
-    String myUid, {
-    required bool isOnline,
-  }) {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _newMalesStream,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(color: Color(0xFFE11D48)),
-          );
-        }
-
-              final users = snapshot.data ?? [];
-              if (users.isEmpty) {
-                return RefreshIndicator(
-                  color: const Color(0xFFE11D48),
-                  onRefresh: () async => _refreshNewMales(appState.primaryLanguage),
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      const SizedBox(height: 70),
-                      Center(
-                        child: Column(
-                          children: [
-                            Icon(Icons.person_search_rounded, size: 64, color: Colors.grey.shade400),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'No new male users right now.',
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: AppColors.textGrey,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              'Pull down to refresh',
-                              style: TextStyle(fontSize: 13, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return RefreshIndicator(
-                color: const Color(0xFFE11D48),
-                onRefresh: () async => _refreshNewMales(appState.primaryLanguage),
-                child: ListView.builder(
-                  padding: const EdgeInsets.only(top: 8, bottom: 24),
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  itemCount: users.length,
-                  itemBuilder: (context, index) {
-                    final user = users[index];
-                    final targetUid = user['uid'] as String? ?? '';
-                    final nickname = user['nickname'] as String? ?? 'User';
-                    final avatarUrl = user['avatarUrl'] as String?;
-                    final avatarIndex = (user['avatarIndex'] as num?)?.toInt() ?? 1;
-                    final userLang = user['language'] as String? ?? 'Hindi';
-
-                    return _buildModernChatCard(
-                      uid: targetUid,
-                      role: 'user',
-                      name: nickname,
-                      subtitle: 'Available for call • $userLang',
-                      trailingText: '1m Free',
-                      unreadCount: 0,
-                      avatarUrl: avatarUrl,
-                      avatarIndex: avatarIndex,
-                      showCallButton: true, // In general show BOTH call and message button
-                      isOnline: isOnline,
-                      onDisabledTap: () => _showGoOnlinePrompt(context, appState),
-                      onCallTap: () => _startIntroCall(appState, user),
-                      onMessageTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HybridChatScreen(
-                              myUid: myUid,
-                              otherUid: targetUid,
-                              otherUserName: nickname,
-                              otherUserAvatarUrl: avatarUrl,
-                              otherUserAvatarIndex: avatarIndex,
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              );
-            },
-          );
   }
 
   // ─── FRIENDS CARD DESIGN (Single-Line Modern Design) ─────────────────────
@@ -588,222 +401,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
                       Icons.chat_bubble_rounded,
                       color: isOnline ? Colors.white : const Color(0xFF94A3B8),
                       size: 19,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─── GENERAL CARD DESIGN (Matching user uploaded image) ──────────────────
-
-  Widget _buildModernChatCard({
-    required String uid,
-    required String role,
-    required String name,
-    required String subtitle,
-    required String trailingText,
-    required int unreadCount,
-    String? avatarUrl,
-    int? avatarIndex,
-    required bool showCallButton,
-    bool isOnline = true,
-    VoidCallback? onDisabledTap,
-    required VoidCallback onMessageTap,
-    VoidCallback? onCallTap,
-  }) {
-    final isPinned = _pinnedUids.contains(uid);
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isPinned ? const Color(0xFFE11D48).withValues(alpha: 0.35) : const Color(0xFFE2E8F0),
-          width: 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: InkWell(
-        onTap: isOnline ? onMessageTap : onDisabledTap,
-        borderRadius: BorderRadius.circular(20),
-        child: Row(
-          children: [
-            // Avatar
-            LocalAvatarWidget(
-              uid: uid,
-              role: role,
-              radius: 26,
-              avatarIndex: avatarIndex ?? 1,
-              avatarUrl: avatarUrl,
-            ),
-            const SizedBox(width: 12),
-
-            // Name and Subtitle
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textDark,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: unreadCount > 0 ? AppColors.textDark : AppColors.textGrey,
-                      fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w500,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-
-            // Time / Badge (if any)
-            if (trailingText.isNotEmpty || unreadCount > 0) ...[
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (trailingText.isNotEmpty)
-                    Text(
-                      trailingText,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFF94A3B8),
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  if (unreadCount > 0) ...[
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: const BoxDecoration(
-                        color: Color(0xFFE11D48),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        unreadCount.toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(width: 8),
-            ],
-
-            // Green Call Button (if showCallButton)
-            if (showCallButton && onCallTap != null) ...[
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: isOnline ? onCallTap : onDisabledTap,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Ink(
-                    height: 38,
-                    width: 38,
-                    decoration: BoxDecoration(
-                      gradient: isOnline
-                          ? const LinearGradient(
-                              colors: [Color(0xFF10B981), Color(0xFF059669)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            )
-                          : const LinearGradient(
-                              colors: [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: isOnline
-                          ? [
-                              BoxShadow(
-                                color: const Color(0xFF10B981).withValues(alpha: 0.35),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Center(
-                      child: Icon(
-                        Icons.call_rounded,
-                        color: isOnline ? Colors.white : const Color(0xFF94A3B8),
-                        size: 19,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
-
-            // Blue Message Button
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: isOnline ? onMessageTap : onDisabledTap,
-                borderRadius: BorderRadius.circular(16),
-                child: Ink(
-                  height: 38,
-                  width: 38,
-                  decoration: BoxDecoration(
-                    gradient: isOnline
-                        ? const LinearGradient(
-                            colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : const LinearGradient(
-                            colors: [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: isOnline
-                        ? [
-                            BoxShadow(
-                              color: const Color(0xFF3B82F6).withValues(alpha: 0.35),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Center(
-                    child: Icon(
-                      Icons.chat_bubble_rounded,
-                      color: isOnline ? Colors.white : const Color(0xFF94A3B8),
-                      size: 18,
                     ),
                   ),
                 ),
@@ -1091,137 +688,4 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       ),
     );
   }
-
-  Future<void> _startIntroCall(
-    AppState appState,
-    Map<String, dynamic> maleUser,
-  ) async {
-    if (_isCallingUser) return;
-    final status = await Permission.microphone.request();
-    if (!status.isGranted) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Microphone permission required for calling.')),
-      );
-      return;
-    }
-
-    setState(() => _isCallingUser = true);
-    final targetUid = maleUser['uid'] as String;
-    final nickname = maleUser['nickname'] as String? ?? 'User';
-    final avatarUrl = maleUser['avatarUrl'] as String?;
-    final avatarIndex = (maleUser['avatarIndex'] as num?)?.toInt() ?? 1;
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-            ),
-            const SizedBox(width: 12),
-            Text('Calling $nickname (1-Min Free Intro)...'),
-          ],
-        ),
-        duration: const Duration(seconds: 4),
-      ),
-    );
-
-    try {
-      String receiverFcmToken = '';
-      try {
-        final tokenSnap = await NewMaleService.instance.maleUsersRef.child(targetUid).child('fcmToken').get();
-        if (tokenSnap.exists && tokenSnap.value != null && tokenSnap.value.toString().isNotEmpty) {
-          receiverFcmToken = tokenSnap.value.toString();
-        } else {
-          final poolTokenSnap = await NewMaleService.instance.newMalesPoolRef.child(targetUid).child('fcmToken').get();
-          if (poolTokenSnap.exists && poolTokenSnap.value != null && poolTokenSnap.value.toString().isNotEmpty) {
-            receiverFcmToken = poolTokenSnap.value.toString();
-          }
-        }
-      } catch (e) {
-        debugPrint('[ChatList] Error fetching fresh FCM token for $targetUid: $e');
-      }
-
-      if (receiverFcmToken.isEmpty) {
-        receiverFcmToken = (maleUser['fcmToken'] as String?) ?? '';
-      }
-
-      // Fallback to Firestore users collection if still empty
-      if (receiverFcmToken.isEmpty) {
-        try {
-          final uDoc = await FirebaseFirestore.instance.collection('users').doc(targetUid).get();
-          if (uDoc.exists && uDoc.data() != null) {
-            final fToken = uDoc.data()!['fcmToken'] as String?;
-            if (fToken != null && fToken.isNotEmpty) {
-              receiverFcmToken = fToken;
-              // Sync back to 1e689 RTDB
-              NewMaleService.instance.maleUsersRef.child(targetUid).child('fcmToken').set(fToken).catchError((_) {});
-            }
-          }
-        } catch (_) {}
-      }
-
-      // Temporarily mark target male as busy so other females don't call him simultaneously
-      NewMaleService.instance.newMalesPoolRef.child(targetUid).update({
-        'callStatus': 'busy',
-        'busyAt': ServerValue.timestamp,
-      }).catchError((_) {});
-
-      final callService = CallService(databaseURL: NewMaleService.newDbUrl);
-      final roomId = await callService.startCall(
-        expertId: targetUid,
-        callerId: appState.uid,
-        callerCoins: 0,
-        pricePerMin: 0.0,
-        extraRoomData: {
-          'isFreeIntroCall': true,
-          'maxDurationSeconds': 60,
-          'callerName': appState.nickname.isNotEmpty ? appState.nickname : 'Female Expert',
-          'callerAvatar': 'assets/avatars/female_${appState.avatarIndex}.png',
-          'callerAvatarIndex': appState.avatarIndex,
-          'callerLanguage': appState.primaryLanguage.isNotEmpty ? appState.primaryLanguage : 'Hindi',
-          'receiverLanguage': maleUser['language'] ?? 'Hindi',
-          'receiverFcmToken': receiverFcmToken,
-          'dbUrl': NewMaleService.newDbUrl,
-        },
-        onRemoteStream: (_) {},
-        onCallEnded: () {},
-      );
-
-      if (!mounted) return;
-      setState(() => _isCallingUser = false);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ActiveCallPage(
-            callRoomId: roomId,
-            receiverId: targetUid,
-            callerId: appState.uid,
-            nickname: nickname,
-            avatarUrl: avatarUrl,
-            avatarIndex: avatarIndex,
-            pricePerMin: 0.0,
-            isCaller: true,
-            preStartedCallService: callService,
-            callDatabaseURL: NewMaleService.newDbUrl,
-            isFreeIntroCall: true,
-            maxDurationSeconds: 60,
-            callerLanguage: appState.primaryLanguage.isNotEmpty ? appState.primaryLanguage : 'Hindi',
-          ),
-        ),
-      );
-    } catch (e) {
-      debugPrint('[ChatList] Error starting intro call: $e');
-      if (!mounted) return;
-      setState(() => _isCallingUser = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to place call: $e')),
-      );
-    }
-  }
-
 }

@@ -315,6 +315,9 @@ class _HybridChatScreenState extends State<HybridChatScreen> with WidgetsBinding
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.light,
           statusBarBrightness: Brightness.dark,
+          systemNavigationBarColor: Colors.white,
+          systemNavigationBarIconBrightness: Brightness.dark,
+          systemNavigationBarDividerColor: Color(0xFFE2E8F0),
         ),
         flexibleSpace: Container(
           decoration: const BoxDecoration(

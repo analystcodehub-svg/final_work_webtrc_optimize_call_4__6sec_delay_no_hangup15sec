@@ -6,7 +6,6 @@ import 'active_call_page.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/app_state.dart';
 import '../models/female_expert.dart';
@@ -24,7 +23,6 @@ import 'expert_feed_screen.dart';
 import '../services/foreground_task_service.dart';
 import '../services/local_chat_database.dart';
 import '../services/user_database_service.dart';
-import '../services/new_male_service.dart';
 
 class MaleCallerDashboard extends StatefulWidget {
   const MaleCallerDashboard({super.key});
@@ -51,7 +49,6 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
 
   final ScrollController _homeScrollController = ScrollController();
   StreamSubscription? _incomingCallSubscription;
-  StreamSubscription? _introCallSubscription;
   StreamSubscription? _walletSubscription;
 
   Future<List<Map<String, dynamic>>> _fetchEnrichedCallLogs(String uid) async {
@@ -425,48 +422,6 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
       },
     );
 
-    // Listen for incoming 1-minute intro calls from female experts on new database (zegochat-c44b0-1e689)
-    _introCallSubscription?.cancel();
-    _introCallSubscription = CallService(
-      databaseURL: NewMaleService.newDbUrl,
-    ).listenForIncomingCalls(
-      expertId: myUid,
-      onCallReceived: (roomId, callerId) {
-        // Foreground user receives immediate in-app incoming call screen
-        if (mounted) {
-          _openIncomingCallScreen(roomId, callerId, isIntro: true);
-        }
-      },
-    );
-
-    // Sync male user to new_males_pool & language buckets on new RTDB for female discovery
-    final maleLang = appState.primaryLanguage.isNotEmpty ? appState.primaryLanguage : 'Hindi';
-    if (appState.coinBalance > 0) {
-      NewMaleService.instance.markRecharged(myUid, language: maleLang);
-    } else {
-      FirebaseMessaging.instance.getToken().then((token) {
-        NewMaleService.instance.registerOrUpdateMale(
-          uid: myUid,
-          nickname: appState.nickname,
-          avatarUrl: '',
-          avatarIndex: appState.avatarIndex,
-          language: maleLang,
-          fcmToken: token,
-          isOnline: true,
-        );
-      }).catchError((_) {
-        NewMaleService.instance.registerOrUpdateMale(
-          uid: myUid,
-          nickname: appState.nickname,
-          avatarUrl: '',
-          avatarIndex: appState.avatarIndex,
-          language: maleLang,
-          isOnline: true,
-        );
-      });
-    }
-    NewMaleService.instance.setMaleOfflineOnDisconnect(myUid, language: maleLang);
-
     // Listen to real-time wallet balance changes
     _walletSubscription?.cancel();
     _walletSubscription = UserDatabaseService.instance.usersRef
@@ -477,9 +432,6 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
       if (event.snapshot.exists && event.snapshot.value != null && mounted) {
         final coins = (event.snapshot.value as num).toInt();
         context.read<AppState>().setCoinBalance(coins);
-        if (coins > 0) {
-          NewMaleService.instance.markRecharged(myUid, language: maleLang);
-        }
       }
     });
   }
@@ -491,7 +443,6 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
     // HybridChatService.instance.dispose();
     _chatUpdatesSubscription?.cancel();
     _incomingCallSubscription?.cancel();
-    _introCallSubscription?.cancel();
     _walletSubscription?.cancel();
     _homeScrollController.dispose();
     super.dispose();
@@ -740,6 +691,7 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
         statusBarBrightness: Brightness.light,
         systemNavigationBarColor: Colors.white,
         systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Color(0xFFE2E8F0),
       ),
       child: Scaffold(
         backgroundColor: brandBg,
@@ -942,11 +894,11 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
     };
   }
 
-  void _openIncomingCallScreen(String roomId, String callerId, {required bool isIntro}) async {
+  void _openIncomingCallScreen(String roomId, String callerId, {bool isIntro = false}) async {
     if (_isIncomingCallActive) return;
     _isIncomingCallActive = true;
 
-    final dbUrl = isIntro ? NewMaleService.newDbUrl : 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
+    final dbUrl = 'https://zegochat-c44b0.asia-southeast1.firebasedatabase.app';
     final callerInfo = await _fetchCallerInfo(callerId, roomId: roomId, dbUrl: dbUrl);
     if (!mounted) {
       _isIncomingCallActive = false;
@@ -971,7 +923,7 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
           isCaller: false,
           pricePerMin: 0.0,
           isFreeIntroCall: isIntro,
-          callDatabaseURL: isIntro ? NewMaleService.newDbUrl : null,
+          callDatabaseURL: dbUrl,
           autoAccept: false,
         ),
       ),

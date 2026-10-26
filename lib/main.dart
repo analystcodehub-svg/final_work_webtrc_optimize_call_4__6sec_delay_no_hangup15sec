@@ -65,6 +65,7 @@ void main() async {
     statusBarBrightness: Brightness.light,    // Dark icons for iOS
     systemNavigationBarColor: Colors.white,
     systemNavigationBarIconBrightness: Brightness.dark,
+    systemNavigationBarDividerColor: Color(0xFFE2E8F0),
   ));
 
   // ── 1. Initialize Firebase ──────────────────────────────────────────────
@@ -155,25 +156,35 @@ class _SajniReAppState extends State<SajniReApp> with WidgetsBindingObserver {
       navigatorKey: navigatorKey,
 
       builder: (context, child) {
-        return StreamBuilder<DatabaseEvent>(
-          stream: FirebaseDatabase.instance.ref('app_settings/maintenance_mode').onValue,
-          builder: (context, snapshot) {
-            bool isMaintenance = false;
-            if (snapshot.hasData && snapshot.data!.snapshot.value != null) {
-              final value = snapshot.data!.snapshot.value;
-              if (value is bool) {
-                isMaintenance = value;
-              } else if (value is String) {
-                isMaintenance = value.toLowerCase() == 'true';
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: const SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.dark,
+            statusBarBrightness: Brightness.light,
+            systemNavigationBarColor: Colors.white,
+            systemNavigationBarIconBrightness: Brightness.dark,
+            systemNavigationBarDividerColor: Color(0xFFE2E8F0),
+          ),
+          child: StreamBuilder<DatabaseEvent>(
+            stream: FirebaseDatabase.instance.ref('app_settings/maintenance_mode').onValue,
+            builder: (context, snapshot) {
+              bool isMaintenance = false;
+              if (snapshot.hasData && snapshot.data!.snapshot.value != null) {
+                final value = snapshot.data!.snapshot.value;
+                if (value is bool) {
+                  isMaintenance = value;
+                } else if (value is String) {
+                  isMaintenance = value.toLowerCase() == 'true';
+                }
               }
-            }
-            
-            if (isMaintenance) {
-              return const MaintenanceScreen();
-            }
-            
-            return child ?? const SizedBox.shrink();
-          },
+              
+              if (isMaintenance) {
+                return const MaintenanceScreen();
+              }
+              
+              return child ?? const SizedBox.shrink();
+            },
+          ),
         );
       },
 
@@ -188,18 +199,19 @@ class _SajniReAppState extends State<SajniReApp> with WidgetsBindingObserver {
           final appState = Provider.of<AppState>(context, listen: false);
           
           // Resolve callerId properly from arguments if available, fallback to name
+          final callerNameStr = args['callerName']?.toString() ?? 'Female Expert';
           final passedCallerId = args['callerId'] as String?;
           final resolvedCallerId = (passedCallerId != null && passedCallerId.isNotEmpty) 
               ? passedCallerId 
-              : args['callerName'] as String;
+              : callerNameStr;
 
           final isFree = args['isFreeIntroCall'] == true || args['isFreeIntroCall'] == 'true';
-          final resolvedDbUrl = args['dbUrl'] as String? ??
-              (isFree ? 'https://zegochat-c44b0-1e689.asia-southeast1.firebasedatabase.app' : null);
+          final resolvedDbUrl = args['dbUrl'] as String?;
 
-          final receiverUid = appState.uid.isNotEmpty 
-              ? appState.uid 
-              : (FirebaseAuth.instance.currentUser?.uid ?? '');
+          String receiverUid = appState.uid;
+          if (receiverUid.isEmpty) {
+            receiverUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+          }
 
           final autoAccept = args['autoAccept'] == true || args['autoAccept'] == 'true';
 
@@ -207,7 +219,7 @@ class _SajniReAppState extends State<SajniReApp> with WidgetsBindingObserver {
             callRoomId: args['callRoomId'] as String,
             receiverId: receiverUid,
             callerId:   resolvedCallerId,
-            nickname:   args['callerName'] as String,
+            nickname:   callerNameStr,
             pricePerMin: isFree
                 ? 0.0
                 : ((args['pricePerMin'] as num?)?.toDouble() ?? 4.0),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 import 'recent_sessions_screen.dart';
 import 'chat_list_screen.dart';
@@ -30,7 +31,16 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarDividerColor: Color(0xFFE2E8F0),
+      ),
+      child: Scaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,
@@ -82,8 +92,9 @@ class _MainNavigationState extends State<MainNavigation> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildIconWithBadge(IconData icon, String count, {bool isActive = false}) {
     return Stack(
