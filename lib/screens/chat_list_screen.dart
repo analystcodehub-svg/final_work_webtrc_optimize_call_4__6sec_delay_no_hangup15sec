@@ -9,6 +9,7 @@ import 'hybrid_chat_screen.dart';
 import '../services/user_database_service.dart';
 import '../services/matchmaking_service.dart';
 import '../services/foreground_task_service.dart';
+import '../services/general_feed_service.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -17,20 +18,42 @@ class ChatListScreen extends StatefulWidget {
   State<ChatListScreen> createState() => _ChatListScreenState();
 }
 
-class _ChatListScreenState extends State<ChatListScreen> {
+class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   late String _currentUserMobile;
   late final MatchmakingService _matchingService;
   final Set<String> _pinnedUids = {};
+  List<Map<String, dynamic>> _generalMales = [];
+  bool _isLoadingGeneral = false;
 
   @override
   void initState() {
     super.initState();
     _matchingService = MatchmakingService();
+    _tabController = TabController(length: 2, vsync: this);
+    final appState = context.read<AppState>();
+    _loadGeneralMales(appState.primaryLanguage);
   }
 
   @override
   void dispose() {
+    _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadGeneralMales(String femaleLang) async {
+    if (_isLoadingGeneral) return;
+    if (mounted) setState(() => _isLoadingGeneral = true);
+    final males = await GeneralFeedService.instance.fetchShuffledMales(
+      femaleLanguage: femaleLang,
+      count: 20,
+    );
+    if (mounted) {
+      setState(() {
+        _generalMales = males;
+        _isLoadingGeneral = false;
+      });
+    }
   }
 
   Future<List<Map<String, dynamic>>> _fetchEnrichedChats(String myUid, bool isCurrentMale) async {
@@ -69,6 +92,108 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final bool isCurrentMale = appState.selectedGender != 'Female';
     final bool isFemaleOnline = appState.isOnline;
 
+    if (!isCurrentMale) {
+      // ── Female View: FRIENDS and GENERAL Tabs ──
+      return Scaffold(
+        backgroundColor: AppColors.bgLight,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Top TabBar Header
+              Container(
+                color: Colors.white,
+                child: TabBar(
+                  controller: _tabController,
+                  dividerColor: Colors.transparent,
+                  labelColor: const Color(0xFFE11D48),
+                  unselectedLabelColor: const Color(0xFF8E8E93),
+                  labelStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.4,
+                  ),
+                  unselectedLabelStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.4,
+                  ),
+                  indicatorColor: const Color(0xFFE11D48),
+                  indicatorWeight: 3.0,
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  tabs: const [
+                    Tab(text: 'FRIENDS'),
+                    Tab(text: 'GENERAL'),
+                  ],
+                ),
+              ),
+
+              // Offline Warning Banner for Female Expert
+              if (!isFemaleOnline)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFFFF1F2),
+                    border: Border(
+                      bottom: BorderSide(color: Color(0xFFFECDD3), width: 1),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi_off_rounded, color: Color(0xFFE11D48), size: 18),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          "You're offline. Go online to chat & call.",
+                          style: TextStyle(
+                            color: Color(0xFF9F1239),
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => _showGoOnlinePrompt(context, appState),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE11D48),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Text(
+                            'Go Online',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Tab Views
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    // Tab 1: FRIENDS (Recent chats)
+                    _buildFriendsTab(context, appState, myUid, isCurrentMale, isOnline: isFemaleOnline),
+
+                    // Tab 2: GENERAL (20 Male Users Feed)
+                    _buildGeneralTab(context, appState, myUid, isOnline: isFemaleOnline),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Male View: Standard Chats ──
     return Scaffold(
       backgroundColor: AppColors.bgLight,
       body: SafeArea(
@@ -87,59 +212,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
             ),
-            // Offline Warning Banner for Female Expert
-            if (!isCurrentMale && !isFemaleOnline)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFFF1F2),
-                  border: Border(
-                    bottom: BorderSide(color: Color(0xFFFECDD3), width: 1),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.wifi_off_rounded, color: Color(0xFFE11D48), size: 18),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        "You're offline. Go online to chat & call.",
-                        style: TextStyle(
-                          color: Color(0xFF9F1239),
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () => _showGoOnlinePrompt(context, appState),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE11D48),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: const Text(
-                          'Go Online',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             Expanded(
               child: _buildFriendsTab(
                 context,
                 appState,
                 myUid,
                 isCurrentMale,
-                isOnline: isCurrentMale ? true : isFemaleOnline,
+                isOnline: true,
               ),
             ),
           ],
@@ -685,6 +764,228 @@ class _ChatListScreenState extends State<ChatListScreen> {
             style: TextStyle(fontSize: 18, color: AppColors.textGrey),
           ),
         ],
+      ),
+    );
+  }
+
+  // ─── TAB 2: GENERAL (20 Male Users Feed from zegochat-c44b0-42f39) ─────────
+
+  Widget _buildGeneralTab(
+    BuildContext context,
+    AppState appState,
+    String myUid, {
+    required bool isOnline,
+  }) {
+    if (_isLoadingGeneral && _generalMales.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: Color(0xFFE11D48)),
+      );
+    }
+
+    if (_generalMales.isEmpty) {
+      return RefreshIndicator(
+        color: const Color(0xFFE11D48),
+        onRefresh: () async => _loadGeneralMales(appState.primaryLanguage),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            const SizedBox(height: 70),
+            Center(
+              child: Column(
+                children: [
+                  Icon(Icons.person_search_rounded, size: 64, color: Colors.grey.shade400),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'No active users right now.',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: AppColors.textGrey,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Pull down to refresh',
+                    style: TextStyle(fontSize: 13, color: Colors.grey),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      color: const Color(0xFFE11D48),
+      onRefresh: () async => _loadGeneralMales(appState.primaryLanguage),
+      child: ListView.builder(
+        padding: const EdgeInsets.only(top: 8, bottom: 24),
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _generalMales.length,
+        itemBuilder: (context, index) {
+          final user = _generalMales[index];
+          final targetUid = user['uid'] as String? ?? '';
+          final nickname = user['nickname'] as String? ?? 'User';
+          final avatarUrl = user['avatarUrl'] as String?;
+          final avatarIndex = (user['avatarIndex'] as num?)?.toInt() ?? 1;
+          final userLang = user['language'] as String? ?? 'Hindi';
+
+          return _buildGeneralChatCard(
+            uid: targetUid,
+            name: nickname,
+            subtitle: 'Available to chat • $userLang',
+            avatarUrl: avatarUrl,
+            avatarIndex: avatarIndex,
+            isOnline: isOnline,
+            onDisabledTap: () => _showGoOnlinePrompt(context, appState),
+            onMessageTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => HybridChatScreen(
+                    myUid: myUid,
+                    otherUid: targetUid,
+                    otherUserName: nickname,
+                    otherUserAvatarUrl: avatarUrl,
+                    otherUserAvatarIndex: avatarIndex,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  // ─── GENERAL CARD DESIGN (Matching Friends UI Theme) ─────────────────────
+
+  Widget _buildGeneralChatCard({
+    required String uid,
+    required String name,
+    required String subtitle,
+    String? avatarUrl,
+    int? avatarIndex,
+    bool isOnline = true,
+    VoidCallback? onDisabledTap,
+    required VoidCallback onMessageTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFE2E8F0),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: isOnline ? onMessageTap : onDisabledTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Row(
+          children: [
+            // Avatar
+            LocalAvatarWidget(
+              uid: uid,
+              role: 'user',
+              radius: 26,
+              avatarIndex: avatarIndex ?? 1,
+              avatarUrl: avatarUrl,
+            ),
+            const SizedBox(width: 12),
+
+            // Name and Subtitle
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textGrey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+
+            // Blue Message Button
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: isOnline ? onMessageTap : onDisabledTap,
+                borderRadius: BorderRadius.circular(16),
+                child: Ink(
+                  height: 40,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    gradient: isOnline
+                        ? const LinearGradient(
+                            colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          )
+                        : const LinearGradient(
+                            colors: [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: isOnline
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF3B82F6).withValues(alpha: 0.35),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.04),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.chat_bubble_rounded,
+                      color: isOnline ? Colors.white : const Color(0xFF94A3B8),
+                      size: 19,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

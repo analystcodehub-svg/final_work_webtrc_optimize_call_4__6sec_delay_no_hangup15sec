@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/user_database_service.dart';
+import '../services/general_feed_service.dart';
 import 'package:firebase_database/firebase_database.dart';
 
 class AppState extends ChangeNotifier {
@@ -194,6 +195,12 @@ class AppState extends ChangeNotifier {
       _pendingChatFreeMsgs += freeMsgs;
       await prefs.setInt('pendingChatFreeMsgs', _pendingChatFreeMsgs);
       incrementFreeMessagesUsed(); // instant UI update
+      if (_freeMessagesUsed >= 5 && uid.isNotEmpty) {
+        GeneralFeedService.instance.markFreeMessagesExhausted(
+          uid: uid,
+          language: _primaryLanguage,
+        );
+      }
     }
     
     final myUid = uid.isNotEmpty ? uid : "test_uid";

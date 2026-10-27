@@ -7,6 +7,7 @@ import '../../providers/app_state.dart';
 import '../male_dashboard_screen.dart';
 import '../avatar_selection_page.dart';
 import '../../services/user_database_service.dart';
+import '../../services/general_feed_service.dart';
 
 class MaleOnboardingParent extends StatefulWidget {
   const MaleOnboardingParent({super.key});
@@ -49,7 +50,13 @@ class _MaleOnboardingParentState extends State<MaleOnboardingParent> {
           'freeMessagesUsed': 0,
         });
 
-
+        // Register new male user in General Feed bucket (zegochat-c44b0-42f39)
+        GeneralFeedService.instance.registerMaleIfEligible(
+          uid: appState.uid,
+          nickname: nickname,
+          avatarIndex: appState.avatarIndex,
+          language: appState.primaryLanguage,
+        );
 
         if (mounted) {
           Navigator.pushAndRemoveUntil(

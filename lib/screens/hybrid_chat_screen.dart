@@ -10,6 +10,7 @@ import '../widgets/local_avatar_widget.dart';
 import 'wallet_recharge_screen.dart';
 import '../services/block_service.dart';
 import '../services/user_database_service.dart';
+import '../services/general_feed_service.dart';
 class HybridChatScreen extends StatefulWidget {
   final String myUid;
   final String otherUid;
@@ -206,6 +207,12 @@ class _HybridChatScreenState extends State<HybridChatScreen> with WidgetsBinding
         // Use a free message
         appState.addPendingChatDeduction(coins: 0, freeMsgs: 1);
         deductedAmount = 0.00;
+        if (appState.freeMessagesUsed >= 5) {
+          GeneralFeedService.instance.markFreeMessagesExhausted(
+            uid: appState.uid,
+            language: appState.primaryLanguage,
+          );
+        }
       } else {
         // Deduct 5 coins (50 paise = ₹0.50)
         if (appState.coinBalance < 5) {

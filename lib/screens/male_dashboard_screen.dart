@@ -23,6 +23,7 @@ import 'expert_feed_screen.dart';
 import '../services/foreground_task_service.dart';
 import '../services/local_chat_database.dart';
 import '../services/user_database_service.dart';
+import '../services/general_feed_service.dart';
 
 class MaleCallerDashboard extends StatefulWidget {
   const MaleCallerDashboard({super.key});
@@ -434,6 +435,15 @@ class _MaleCallerDashboardState extends State<MaleCallerDashboard> with WidgetsB
         context.read<AppState>().setCoinBalance(coins);
       }
     });
+
+    // Register male into General Feed Bucket (zegochat-c44b0-42f39) via Gatekeeper
+    final maleLang = appState.primaryLanguage.isNotEmpty ? appState.primaryLanguage : 'Hindi';
+    GeneralFeedService.instance.registerMaleIfEligible(
+      uid: myUid,
+      nickname: appState.nickname,
+      avatarIndex: appState.avatarIndex,
+      language: maleLang,
+    );
   }
 
   @override

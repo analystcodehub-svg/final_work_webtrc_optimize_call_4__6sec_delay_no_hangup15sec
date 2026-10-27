@@ -1,0 +1,17 @@
+{
+  "rules": {
+    ".read": true,
+    ".write": true,
+    "general_buckets": {
+      "$language": {
+        ".indexOn": ["timestamp", "uid"]
+      }
+    },
+    "used_free_messages": {
+      "$language": {
+        ".indexOn": [".value"]
+      }
+    }
+  }
+}
+

@@ -49,6 +49,8 @@ android {
         }
     }
 
+    val isBuildingBundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.sajnire.app"
@@ -60,11 +62,13 @@ android {
         versionName = flutter.versionName
 
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            if (isBuildingBundle) {
+                abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            } else {
+                abiFilters.addAll(listOf("arm64-v8a"))
+            }
         }
     }
-
-    val isBuildingBundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
 
     buildTypes {
         release {
@@ -107,7 +111,25 @@ android {
 
     packaging {
         jniLibs {
-            excludes.addAll(listOf("lib/x86/**", "lib/x86_64/**"))
+            useLegacyPackaging = true
+            excludes.addAll(listOf(
+                "lib/x86/**",
+                "lib/x86_64/**",
+                "**/libVkLayer_khronos_validation.so"
+            ))
+            if (!isBuildingBundle) {
+                excludes.add("lib/armeabi-v7a/**")
+            }
+        }
+        resources {
+            excludes.addAll(listOf(
+                "META-INF/*.version",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt"
+            ))
         }
     }
 }

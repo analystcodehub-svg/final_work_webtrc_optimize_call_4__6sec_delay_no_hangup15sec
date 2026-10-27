@@ -1,4 +1,10 @@
 {
+  "database": [
+    {
+      "instance": "zegochat-c44b0-42f39",
+      "rules": "zegochat-c44b0-42f39.rules.json"
+    }
+  ],
   "functions": [
     {
       "source": "functions",
